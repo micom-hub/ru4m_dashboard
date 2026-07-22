@@ -6,12 +6,12 @@ library(ggplot2)
 library(plotly)
 library(sf)
 library(googledrive)
-library(here)
+# library(here)
 # --- 1. LOAD DATA FROM SHINY BUNDLE ---
 # rds_path <- "data/shiny_app_data.rds"
 
-drive_auth(path = here::here("google", "ru4m-dashboard-60f0e985d2fe.json"))
-
+# drive_auth(path = here::here("google", "ru4m-dashboard-60f0e985d2fe.json"))
+drive_auth(path = ("google/ru4m-dashboard-60f0e985d2fe.json"))
 target_folder_id <- "17quURw4Jfk28B6xiC6nOyV5zvR151Dr6"
 
 # Function to read the RDS file directly into memory
