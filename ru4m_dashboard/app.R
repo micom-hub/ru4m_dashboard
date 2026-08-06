@@ -93,6 +93,10 @@ if(nrow(minet_1yr) > 0) {
   global_hist_bacti_lims <- c(0, 10)
 }
 
+# Helpers for min/max that gracefully handle all-NA groups (avoid Inf/-Inf)
+safe_min <- function(x) { v <- suppressWarnings(min(x, na.rm = TRUE)); if (is.infinite(v)) NA_real_ else v }
+safe_max <- function(x) { v <- suppressWarnings(max(x, na.rm = TRUE)); if (is.infinite(v)) NA_real_ else v }
+
 # UI Choices
 site_choices_vec <- unname(as.character(geo_info$id))
 site_names_vec   <- as.character(geo_info$BeachName)
@@ -525,9 +529,18 @@ server <- function(input, output, session) {
       ) %>%
       group_by(SampleDate) %>% 
       summarise(
-        ecoli_actual = mean(minet_ecoli_log, na.rm = TRUE),
-        bact_actual  = mean(minet_bact_log, na.rm = TRUE),
-        ecoli_fcst   = mean(fcst_ecoli_log, na.rm = TRUE),
+        ecoli_actual     = mean(minet_ecoli_log, na.rm = TRUE),
+        ecoli_actual_min = safe_min(minet_ecoli_log),
+        ecoli_actual_max = safe_max(minet_ecoli_log),
+        ecoli_actual_n   = sum(!is.na(minet_ecoli_log)),
+        bact_actual      = mean(minet_bact_log, na.rm = TRUE),
+        bact_actual_min  = safe_min(minet_bact_log),
+        bact_actual_max  = safe_max(minet_bact_log),
+        bact_actual_n    = sum(!is.na(minet_bact_log)),
+        ecoli_fcst       = mean(fcst_ecoli_log, na.rm = TRUE),
+        ecoli_fcst_min   = safe_min(fcst_ecoli_log),
+        ecoli_fcst_max   = safe_max(fcst_ecoli_log),
+        ecoli_fcst_n     = sum(!is.na(fcst_ecoli_log)),
         ecoli_actual_raw = mean(ecoli_actual_raw, na.rm = TRUE),
         bact_actual_raw  = mean(bact_actual_raw, na.rm = TRUE),
         ecoli_fcst_raw   = mean(exp(fcst_ecoli_log) - 0.001, na.rm = TRUE),
@@ -547,21 +560,33 @@ server <- function(input, output, session) {
     
     p <- ggplot(plot_df, aes(x = SampleDate)) +
       geom_hline(yintercept = thresh_val, linetype = "dashed", color = "red", linewidth = 0.8, alpha = 0.7) +
+      geom_ribbon(aes(ymin = ecoli_actual_min, ymax = ecoli_actual_max), fill = "black", alpha = 0.12) +
+      geom_ribbon(aes(ymin = bact_actual_min, ymax = bact_actual_max), fill = "blue", alpha = 0.12) +
+      geom_ribbon(aes(ymin = ecoli_fcst_min, ymax = ecoli_fcst_max), fill = "#e74c3c", alpha = 0.12) +
       geom_line(aes(y = ecoli_actual, color = "E. coli (MPN)"), linewidth = 1.2, linetype = "dashed", alpha = 0.8) +
       geom_point(aes(y = ecoli_actual, color = "E. coli (MPN)",
                      text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
                                    "<br><b>Metric:</b> E. coli (Colilert 18)",
-                                   "<br><b>Log Value:</b> ", round(ecoli_actual, 3))), size = 3, shape = 18, alpha = 0.8) +
+                                   "<br><b>Log Value (Mean):</b> ", round(ecoli_actual, 3),
+                                   "<br><b>Min:</b> ", round(ecoli_actual_min, 3),
+                                   "<br><b>Max:</b> ", round(ecoli_actual_max, 3),
+                                   "<br><b>N:</b> ", ecoli_actual_n)), size = 3, shape = 18, alpha = 0.8) +
       geom_line(aes(y = bact_actual, color = "Bactiquick"), linewidth = 1.2, linetype = "dotted", alpha = 0.8) +
       geom_point(aes(y = bact_actual, color = "Bactiquick",
                      text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
                                    "<br><b>Metric:</b> Bactiquick",
-                                   "<br><b>Log Value:</b> ", round(bact_actual, 3))), size = 3, shape = 17, alpha = 0.8) +
+                                   "<br><b>Log Value (Mean):</b> ", round(bact_actual, 3),
+                                   "<br><b>Min:</b> ", round(bact_actual_min, 3),
+                                   "<br><b>Max:</b> ", round(bact_actual_max, 3),
+                                   "<br><b>N:</b> ", bact_actual_n)), size = 3, shape = 17, alpha = 0.8) +
       geom_line(aes(y = ecoli_fcst, color = "Forecasted E. coli"), linewidth = 1.2, alpha = 0.8) +
       geom_point(aes(y = ecoli_fcst, color = "Forecasted E. coli",
                      text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
                                    "<br><b>Metric:</b> Forecasted E. coli",
-                                   "<br><b>Log Value:</b> ", round(ecoli_fcst, 3))), size = 3, alpha = 0.8) +
+                                   "<br><b>Log Value (Mean):</b> ", round(ecoli_fcst, 3),
+                                   "<br><b>Min:</b> ", round(ecoli_fcst_min, 3),
+                                   "<br><b>Max:</b> ", round(ecoli_fcst_max, 3),
+                                   "<br><b>N:</b> ", ecoli_fcst_n)), size = 3, alpha = 0.8) +
       scale_color_manual(values = color_mapping, name = "Data Source") + 
       theme_minimal() + 
       labs(x = "Date", y = "Log Level") + 
@@ -571,7 +596,7 @@ server <- function(input, output, session) {
       )
     
     ggplotly(p, tooltip = "text") %>%
-      style(hoverinfo = "none", traces = 1) %>%
+      style(hoverinfo = "none", traces = c(1, 2, 3, 4)) %>%
       layout(
         autosize = TRUE,
         margin = list(l = 45, r = 120, t = 20, b = 40),
