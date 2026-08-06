@@ -140,7 +140,7 @@ ui <- fluidPage(
                  selectizeInput("comp_site", "Select Specific Site:", choices = NULL),
                  
                  sliderInput("bacti_thresh_val", "Bactiquick Exceedance Threshold (ERU):",
-                             min = 10, max = 400, value = 100, step = 10),
+                             min = 10, max = 150, value = 100, step = 10),
                  hr(),
                  radioButtons("color_mode", "Relationship Color Mode:",
                               choices = c("Exceedance Disagreement" = "disagree",
