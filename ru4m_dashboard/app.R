@@ -65,9 +65,9 @@ tab2_max_date <- as.Date(shiny_data_bundle$config$tab2_max_date)
 
 mi_counties_map <- suppressWarnings(st_drop_geometry(mi_counties_sf))
 
-# Calculate Maximum Raw Limits for Sliders
-max_ecoli_val <- if (nrow(minet_data) > 0) ceiling(max(exp(minet_data$ecoli_log) - 0.001, na.rm = TRUE)) else 1000
-max_bacti_val <- if (nrow(minet_data) > 0) ceiling(max(exp(minet_data$bactiquick_log) - 0.001, na.rm = TRUE)) else 1000
+# Calculate Maximum Raw Limits for Sliders (Using log10)
+max_ecoli_val <- if (nrow(minet_data) > 0) ceiling(max(10^(minet_data$ecoli_log) - 0.001, na.rm = TRUE)) else 1000
+max_bacti_val <- if (nrow(minet_data) > 0) ceiling(max(10^(minet_data$bactiquick_log) - 0.001, na.rm = TRUE)) else 1000
 
 # --- GLOBAL LIMITS ---
 global_ecoli_limits <- c(min(current_fcst$Forecasted_Ecoli_Level, na.rm = TRUE), max(current_fcst$Forecasted_Ecoli_Level, na.rm = TRUE))
@@ -137,10 +137,18 @@ ui <- fluidPage(
                  sliderInput("bacti_limit", "Bactiquick Level Range (ERU):",
                              min = 0, max = max_bacti_val, value = c(0, max_bacti_val)),
                  
-                 selectizeInput("comp_site", "Select Specific Site:", choices = NULL),
+                 selectizeInput("comp_site", "Select Specific Site(s):", choices = NULL, multiple = TRUE),
+                 actionLink("clear_sites", "Clear All Selected Sites", style = "color: #e74c3c;"),
+                 br(), br(),
                  
-                 sliderInput("bacti_thresh_val", "Bactiquick Exceedance Threshold (ERU):",
-                             min = 10, max = 150, value = 100, step = 10),
+                 numericInput("ecoli_thresh_val", "E. coli Threshold (MPN):",
+                              value = 300, step = 1),
+                 
+                 numericInput("bacti_thresh_val", "Bactiquick Threshold (ERU):",
+                              value = 100, step = 1),
+                 
+                 checkboxInput("show_qpcr_ddpcr", "Show qPCR and ddPCR on Comparison", value = FALSE),
+                 
                  hr(),
                  radioButtons("color_mode", "Relationship Color Mode:",
                               choices = c("Exceedance Disagreement" = "disagree",
@@ -155,12 +163,11 @@ ui <- fluidPage(
                mainPanel(
                  width = 9,
                  tabsetPanel(
-                   tabPanel("Log Scale Results",
-                            h4("Forecasts and Assay Results (Log Scale)"),
-                            # Adjusts to 40% of the user's screen height
+                   tabPanel("Log10 Scale Results",
+                            h4("Forecasts and Assay Results (Log10 Scale)"),
                             plotlyOutput("compare_plot", width = "100%", height = "40vh"), 
                             hr(),
-                            h4("E. Coli Colilert 18 (MPN) and Bactiquick (ERU) Relationship (Log Scale)"),
+                            h4("E. Coli Colilert 18 (MPN) and Bactiquick (ERU) Relationship (Log10 Scale)"),
                             div(
                               style = "width: 100%; max-width: 60vw; aspect-ratio: 1.25 / 1; height: auto;",
                               plotlyOutput("bact_scatter", width = "100%", height = "100%")
@@ -168,7 +175,6 @@ ui <- fluidPage(
                    ),
                    tabPanel("Raw Assay Results",
                             h4("Forecasts and Actual Tests (Raw)"),
-                            # Adjusts to 40% of the user's screen height
                             plotlyOutput("compare_plot_raw", width = "100%", height = "40vh"),
                             hr(),
                             h4("E. Coli Colilert 18 (MPN) and Bactiquick (ERU) Relationship (Raw)"),
@@ -277,22 +283,26 @@ server <- function(input, output, session) {
   updateSelectizeInput(session, "site", choices = site_choices, server = TRUE, selected = "All")
   updateSelectizeInput(session, "weather_site", choices = site_choices, server = TRUE, selected = "All")
   
+  observeEvent(input$clear_sites, {
+    updateSelectizeInput(session, "comp_site", selected = character(0))
+  })
+  
   filtered_site_ids <- reactive({
-    req(input$exceedance_filter, input$corr_filter, input$bacti_thresh_val, input$ecoli_limit, input$bacti_limit)
+    req(input$exceedance_filter, input$corr_filter, input$bacti_thresh_val, input$ecoli_thresh_val, input$ecoli_limit, input$bacti_limit)
     
     df <- minet_data %>% 
       filter(!is.na(ecoli_log) & !is.na(bactiquick_log)) %>%
       mutate(
-        ecoli_raw = exp(ecoli_log) - 0.001,
-        bacti_raw = exp(bactiquick_log) - 0.001
+        ecoli_raw = 10^(ecoli_log) - 0.001,
+        bacti_raw = 10^(bactiquick_log) - 0.001
       ) %>%
       filter(
         ecoli_raw >= input$ecoli_limit[1] & ecoli_raw <= input$ecoli_limit[2],
         bacti_raw >= input$bacti_limit[1] & bacti_raw <= input$bacti_limit[2]
       )
     
-    bacti_log_thresh <- log(input$bacti_thresh_val + 0.001)
-    ecoli_log_thresh <- log(300 + 0.001)
+    bacti_log_thresh <- log10(input$bacti_thresh_val + 0.001)
+    ecoli_log_thresh <- log10(input$ecoli_thresh_val + 0.001)
     
     site_exceed <- df %>%
       group_by(id) %>%
@@ -352,7 +362,8 @@ server <- function(input, output, session) {
       } else {
         new_choices <- c("No Sites Match Filter" = "None")
       }
-      updateSelectizeInput(session, "comp_site", choices = new_choices, server = TRUE)
+      # Defaulting selected option to "All" (Overall Average)
+      updateSelectizeInput(session, "comp_site", choices = new_choices, selected = "All", server = TRUE)
     } else {
       updateSelectizeInput(session, "comp_site", choices = c("No Match Between Forecast and Minet Dates" = "None"), server = TRUE)
     }
@@ -395,9 +406,9 @@ server <- function(input, output, session) {
         geom_sf(data = mi_counties_sf, fill = "grey90", color = "grey60", linewidth = 0.2) +
         geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
         geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = ecoli_log,
-                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>Log E.coli:", round(ecoli_log, 2))),
+                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>Log10 E.coli:", round(ecoli_log, 2))),
                    size = 4, alpha = 0.9) +
-        scale_color_viridis_c(option = "rocket", direction = -1, limits = global_hist_ecoli_lims, name = "Log(E.coli)") +
+        scale_color_viridis_c(option = "rocket", direction = -1, limits = global_hist_ecoli_lims, name = "Log10(E.coli)") +
         theme_void() + theme(legend.position = "right")
     )
     
@@ -424,9 +435,9 @@ server <- function(input, output, session) {
         geom_sf(data = mi_counties_sf, fill = "grey90", color = "grey60", linewidth = 0.2) +
         geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
         geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = bactiquick_log,
-                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>Log Bacti:", round(bactiquick_log, 2))),
+                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>Log10 Bacti:", round(bactiquick_log, 2))),
                    size = 4, alpha = 0.9) +
-        scale_color_viridis_c(option = "mako", direction = -1, limits = global_hist_bacti_lims, name = "Log(Bacti)") +
+        scale_color_viridis_c(option = "mako", direction = -1, limits = global_hist_bacti_lims, name = "Log10(Bacti)") +
         theme_void() + theme(legend.position = "right")
     )
     
@@ -457,9 +468,9 @@ server <- function(input, output, session) {
         geom_sf(data = mi_counties_sf, fill = "grey90", color = "grey60", linewidth = 0.2) +
         geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
         geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = ecoli_log,
-                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>7-Day Log E.coli:", round(ecoli_log, 2))),
+                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>7-Day Log10 E.coli:", round(ecoli_log, 2))),
                    size = 4, alpha = 0.9) +
-        scale_color_viridis_c(option = "rocket", direction = -1, limits = global_hist_ecoli_lims, name = "Avg Log(E.coli)") +
+        scale_color_viridis_c(option = "rocket", direction = -1, limits = global_hist_ecoli_lims, name = "Avg Log10(E.coli)") +
         theme_void() + theme(legend.position = "right")
     )
     
@@ -490,9 +501,9 @@ server <- function(input, output, session) {
         geom_sf(data = mi_counties_sf, fill = "grey90", color = "grey60", linewidth = 0.2) +
         geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
         geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = bactiquick_log,
-                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>7-Day Log Bacti:", round(bactiquick_log, 2))),
+                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>7-Day Log10 Bacti:", round(bactiquick_log, 2))),
                    size = 4, alpha = 0.9) +
-        scale_color_viridis_c(option = "mako", direction = -1, limits = global_hist_bacti_lims, name = "Avg Log(Bacti)") +
+        scale_color_viridis_c(option = "mako", direction = -1, limits = global_hist_bacti_lims, name = "Avg Log10(Bacti)") +
         theme_void() + theme(legend.position = "right")
     )
     
@@ -505,7 +516,9 @@ server <- function(input, output, session) {
   # --- PERFORMANCE & COMPARISON LOGIC ---
   comp_plot_data <- reactive({
     req(input$comp_site, input$waterbody_filter, input$ecoli_limit, input$bacti_limit)
-    if(!exists("matched_comparison_df") || nrow(matched_comparison_df) == 0 || input$comp_site == "None") {
+    
+    if(!exists("matched_comparison_df") || nrow(matched_comparison_df) == 0 || 
+       (length(input$comp_site) > 0 && "None" %in% input$comp_site)) {
       return(NULL)
     }
     
@@ -513,37 +526,133 @@ server <- function(input, output, session) {
     plot_df <- matched_comparison_df %>% filter(id %in% valid_sites)
     
     if(input$waterbody_filter != "Any") plot_df <- plot_df %>% filter(waterbody_type == input$waterbody_filter)
-    if(input$comp_site != "All") plot_df <- plot_df %>% filter(id == input$comp_site)
+    
+    if(!is.null(input$comp_site) && 
+       !any(c("All", "Overall Average") %in% input$comp_site) && 
+       length(input$comp_site) > 0) {
+      plot_df <- plot_df %>% filter(id %in% input$comp_site)
+    }
     
     if(nrow(plot_df) == 0) return(NULL)
+    
+    safe_min <- function(x) { v <- suppressWarnings(min(x, na.rm = TRUE)); if(is.infinite(v)) NA_real_ else v }
+    safe_max <- function(x) { v <- suppressWarnings(max(x, na.rm = TRUE)); if(is.infinite(v)) NA_real_ else v }
+    
+    find_pcr_col <- function(df, patterns) {
+      cols <- names(df)
+      for (p in patterns) {
+        m <- grep(paste0("^", p, "$"), cols, ignore.case = TRUE, value = TRUE)
+        if (length(m) > 0) return(m[1])
+      }
+      for (p in patterns) {
+        m <- grep(p, cols, ignore.case = TRUE, value = TRUE)
+        if (length(m) > 0) return(m[1])
+      }
+      return(NA_character_)
+    }
+    
+    pcr_patterns_q  <- c("qpcr_log", "minet_qpcr_log", "qpcr_log10", "qpcr", "qpcr_val", "qpcr_results", "qpcr_copies")
+    pcr_patterns_dd <- c("ddpcr_log", "minet_ddpcr_log", "ddpcr_log10", "ddpcr", "ddpcr_val", "ddpcr_results", "ddpcr_copies")
+    
+    qpcr_col  <- find_pcr_col(plot_df, pcr_patterns_q)
+    ddpcr_col <- find_pcr_col(plot_df, pcr_patterns_dd)
+    
+    if ((is.na(qpcr_col) || is.na(ddpcr_col)) && exists("minet_data") && nrow(minet_data) > 0) {
+      mq <- find_pcr_col(minet_data, pcr_patterns_q)
+      mdd <- find_pcr_col(minet_data, pcr_patterns_dd)
+      
+      needed_cols <- c(mq, mdd)[!is.na(c(mq, mdd))]
+      if (length(needed_cols) > 0) {
+        sub_minet <- minet_data %>% 
+          select(id, SampleDate, any_of(needed_cols)) %>%
+          mutate(SampleDate = as.Date(SampleDate))
+        
+        plot_df <- plot_df %>% 
+          mutate(SampleDate = as.Date(SampleDate)) %>%
+          left_join(sub_minet, by = c("id", "SampleDate"))
+        
+        if (is.na(qpcr_col))  qpcr_col  <- find_pcr_col(plot_df, pcr_patterns_q)
+        if (is.na(ddpcr_col)) ddpcr_col <- find_pcr_col(plot_df, pcr_patterns_dd)
+      }
+    }
+    
+    get_clean_pcr <- function(df, col_name) {
+      if (is.na(col_name) || !col_name %in% names(df)) {
+        return(list(log = rep(NA_real_, nrow(df)), raw = rep(NA_real_, nrow(df))))
+      }
+      vals <- as.numeric(df[[col_name]])
+      max_v <- suppressWarnings(max(vals, na.rm = TRUE))
+      if (!is.infinite(max_v) && max_v > 25) {
+        raw_v <- vals
+        log_v <- log10(pmax(vals, 0) + 0.001)
+      } else {
+        log_v <- vals
+        raw_v <- 10^(vals) - 0.001
+      }
+      list(log = log_v, raw = raw_v)
+    }
+    
+    q_parsed  <- get_clean_pcr(plot_df, qpcr_col)
+    dd_parsed <- get_clean_pcr(plot_df, ddpcr_col)
+    
+    plot_df$qpcr_in_log  <- q_parsed$log
+    plot_df$qpcr_in_raw  <- q_parsed$raw
+    plot_df$ddpcr_in_log <- dd_parsed$log
+    plot_df$ddpcr_in_raw <- dd_parsed$raw
     
     plot_df %>% 
       mutate(
         SampleDate = as.Date(SampleDate),
-        ecoli_actual_raw = exp(minet_ecoli_log) - 0.001,
-        bact_actual_raw  = exp(minet_bact_log) - 0.001
+        ecoli_actual_raw = 10^(minet_ecoli_log) - 0.001,
+        bact_actual_raw  = 10^(minet_bact_log) - 0.001
       ) %>%
       filter(
-        ecoli_actual_raw >= input$ecoli_limit[1] & ecoli_actual_raw <= input$ecoli_limit[2],
-        bact_actual_raw >= input$bacti_limit[1] & bact_actual_raw <= input$bacti_limit[2]
+        is.na(ecoli_actual_raw) | (ecoli_actual_raw >= input$ecoli_limit[1] & ecoli_actual_raw <= input$ecoli_limit[2]),
+        is.na(bact_actual_raw)  | (bact_actual_raw >= input$bacti_limit[1] & bact_actual_raw <= input$bacti_limit[2])
       ) %>%
       group_by(SampleDate) %>% 
       summarise(
+        # E. coli Metrics
         ecoli_actual     = mean(minet_ecoli_log, na.rm = TRUE),
         ecoli_actual_min = safe_min(minet_ecoli_log),
         ecoli_actual_max = safe_max(minet_ecoli_log),
         ecoli_actual_n   = sum(!is.na(minet_ecoli_log)),
+        
+        # Bactiquick Metrics
         bact_actual      = mean(minet_bact_log, na.rm = TRUE),
         bact_actual_min  = safe_min(minet_bact_log),
         bact_actual_max  = safe_max(minet_bact_log),
         bact_actual_n    = sum(!is.na(minet_bact_log)),
+        
+        # Forecast Metrics
         ecoli_fcst       = mean(fcst_ecoli_log, na.rm = TRUE),
         ecoli_fcst_min   = safe_min(fcst_ecoli_log),
         ecoli_fcst_max   = safe_max(fcst_ecoli_log),
         ecoli_fcst_n     = sum(!is.na(fcst_ecoli_log)),
+        
+        # Raw Means
         ecoli_actual_raw = mean(ecoli_actual_raw, na.rm = TRUE),
         bact_actual_raw  = mean(bact_actual_raw, na.rm = TRUE),
-        ecoli_fcst_raw   = mean(exp(fcst_ecoli_log) - 0.001, na.rm = TRUE),
+        ecoli_fcst_raw   = mean(10^(fcst_ecoli_log) - 0.001, na.rm = TRUE),
+        
+        # qPCR Metrics
+        qpcr_actual      = { v <- mean(qpcr_in_log, na.rm = TRUE); if(is.nan(v) || is.infinite(v)) NA_real_ else v },
+        qpcr_actual_min  = safe_min(qpcr_in_log),
+        qpcr_actual_max  = safe_max(qpcr_in_log),
+        qpcr_actual_n    = sum(!is.na(qpcr_in_log)),
+        qpcr_actual_raw  = { v <- mean(qpcr_in_raw, na.rm = TRUE); if(is.nan(v) || is.infinite(v)) NA_real_ else v },
+        qpcr_raw_min     = safe_min(qpcr_in_raw),
+        qpcr_raw_max     = safe_max(qpcr_in_raw),
+        
+        # ddPCR Metrics
+        ddpcr_actual     = { v <- mean(ddpcr_in_log, na.rm = TRUE); if(is.nan(v) || is.infinite(v)) NA_real_ else v },
+        ddpcr_actual_min = safe_min(ddpcr_in_log),
+        ddpcr_actual_max = safe_max(ddpcr_in_log),
+        ddpcr_actual_n   = sum(!is.na(ddpcr_in_log)),
+        ddpcr_actual_raw = { v <- mean(ddpcr_in_raw, na.rm = TRUE); if(is.nan(v) || is.infinite(v)) NA_real_ else v },
+        ddpcr_raw_min    = safe_min(ddpcr_in_raw),
+        ddpcr_raw_max    = safe_max(ddpcr_in_raw),
+        
         .groups = "drop"
       )
   })
@@ -555,48 +664,82 @@ server <- function(input, output, session) {
       return(plot_ly() %>% layout(title = "No Data Available for Filters"))
     }
     
-    color_mapping <- c("E. coli (MPN)" = "black", "Bactiquick" = "blue", "Forecasted E. coli" = "#e74c3c")
-    thresh_val <- log(300 + 0.001)
+    color_mapping <- c("E. coli (MPN)" = "black", "Bactiquick" = "blue", "Forecasted E. coli" = "#e74c3c", "qPCR" = "#27ae60", "ddPCR" = "#8e44ad")
+    thresh_val <- log10(input$ecoli_thresh_val + 0.001)
+    
+    # Subsets with non-NA values to guarantee uninterrupted continuous lines
+    ecoli_df <- plot_df %>% filter(!is.na(ecoli_actual))
+    bact_df  <- plot_df %>% filter(!is.na(bact_actual))
+    fcst_df  <- plot_df %>% filter(!is.na(ecoli_fcst))
+    qpcr_df  <- plot_df %>% filter(!is.na(qpcr_actual))
+    ddpcr_df <- plot_df %>% filter(!is.na(ddpcr_actual))
     
     p <- ggplot(plot_df, aes(x = SampleDate)) +
       geom_hline(yintercept = thresh_val, linetype = "dashed", color = "red", linewidth = 0.8, alpha = 0.7) +
-      geom_ribbon(aes(ymin = ecoli_actual_min, ymax = ecoli_actual_max), fill = "black", alpha = 0.12) +
-      geom_ribbon(aes(ymin = bact_actual_min, ymax = bact_actual_max), fill = "blue", alpha = 0.12) +
-      geom_ribbon(aes(ymin = ecoli_fcst_min, ymax = ecoli_fcst_max), fill = "#e74c3c", alpha = 0.12) +
-      geom_line(aes(y = ecoli_actual, color = "E. coli (MPN)"), linewidth = 1.2, linetype = "dashed", alpha = 0.8) +
-      geom_point(aes(y = ecoli_actual, color = "E. coli (MPN)",
-                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
-                                   "<br><b>Metric:</b> E. coli (Colilert 18)",
-                                   "<br><b>Log Value (Mean):</b> ", round(ecoli_actual, 3),
-                                   "<br><b>Min:</b> ", round(ecoli_actual_min, 3),
-                                   "<br><b>Max:</b> ", round(ecoli_actual_max, 3),
-                                   "<br><b>N:</b> ", ecoli_actual_n)), size = 3, shape = 18, alpha = 0.8) +
-      geom_line(aes(y = bact_actual, color = "Bactiquick"), linewidth = 1.2, linetype = "dotted", alpha = 0.8) +
-      geom_point(aes(y = bact_actual, color = "Bactiquick",
-                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
-                                   "<br><b>Metric:</b> Bactiquick",
-                                   "<br><b>Log Value (Mean):</b> ", round(bact_actual, 3),
-                                   "<br><b>Min:</b> ", round(bact_actual_min, 3),
-                                   "<br><b>Max:</b> ", round(bact_actual_max, 3),
-                                   "<br><b>N:</b> ", bact_actual_n)), size = 3, shape = 17, alpha = 0.8) +
-      geom_line(aes(y = ecoli_fcst, color = "Forecasted E. coli"), linewidth = 1.2, alpha = 0.8) +
-      geom_point(aes(y = ecoli_fcst, color = "Forecasted E. coli",
-                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
-                                   "<br><b>Metric:</b> Forecasted E. coli",
-                                   "<br><b>Log Value (Mean):</b> ", round(ecoli_fcst, 3),
-                                   "<br><b>Min:</b> ", round(ecoli_fcst_min, 3),
-                                   "<br><b>Max:</b> ", round(ecoli_fcst_max, 3),
-                                   "<br><b>N:</b> ", ecoli_fcst_n)), size = 3, alpha = 0.8) +
-      scale_color_manual(values = color_mapping, name = "Data Source") + 
+      geom_ribbon(data = ecoli_df, aes(ymin = ecoli_actual_min, ymax = ecoli_actual_max), fill = "black", alpha = 0.12) +
+      geom_ribbon(data = bact_df, aes(ymin = bact_actual_min, ymax = bact_actual_max), fill = "blue", alpha = 0.12) +
+      geom_ribbon(data = fcst_df, aes(ymin = ecoli_fcst_min, ymax = ecoli_fcst_max), fill = "#e74c3c", alpha = 0.12) +
+      geom_line(data = ecoli_df, aes(y = ecoli_actual, color = "E. coli (MPN)"), linewidth = 1.2, linetype = "dashed", alpha = 0.8) +
+      geom_point(data = ecoli_df, aes(y = ecoli_actual, color = "E. coli (MPN)",
+                                      text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                    "<br><b>Metric:</b> E. coli (Colilert 18)",
+                                                    "<br><b>Log10 Value (Mean):</b> ", round(ecoli_actual, 3),
+                                                    "<br><b>Min:</b> ", round(ecoli_actual_min, 3),
+                                                    "<br><b>Max:</b> ", round(ecoli_actual_max, 3),
+                                                    "<br><b>N:</b> ", ecoli_actual_n)), size = 3, shape = 18, alpha = 0.8) +
+      geom_line(data = bact_df, aes(y = bact_actual, color = "Bactiquick"), linewidth = 1.2, linetype = "dotted", alpha = 0.8) +
+      geom_point(data = bact_df, aes(y = bact_actual, color = "Bactiquick",
+                                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                   "<br><b>Metric:</b> Bactiquick",
+                                                   "<br><b>Log10 Value (Mean):</b> ", round(bact_actual, 3),
+                                                   "<br><b>Min:</b> ", round(bact_actual_min, 3),
+                                                   "<br><b>Max:</b> ", round(bact_actual_max, 3),
+                                                   "<br><b>N:</b> ", bact_actual_n)), size = 3, shape = 17, alpha = 0.8) +
+      geom_line(data = fcst_df, aes(y = ecoli_fcst, color = "Forecasted E. coli"), linewidth = 1.2, alpha = 0.8) +
+      geom_point(data = fcst_df, aes(y = ecoli_fcst, color = "Forecasted E. coli",
+                                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                   "<br><b>Metric:</b> Forecasted E. coli",
+                                                   "<br><b>Log10 Value (Mean):</b> ", round(ecoli_fcst, 3),
+                                                   "<br><b>Min:</b> ", round(ecoli_fcst_min, 3),
+                                                   "<br><b>Max:</b> ", round(ecoli_fcst_max, 3),
+                                                   "<br><b>N:</b> ", ecoli_fcst_n)), size = 3, alpha = 0.8)
+    
+    if(input$show_qpcr_ddpcr) {
+      if(nrow(qpcr_df) > 0) {
+        p <- p + 
+          geom_ribbon(data = qpcr_df, aes(ymin = qpcr_actual_min, ymax = qpcr_actual_max), fill = "#27ae60", alpha = 0.12) +
+          geom_line(data = qpcr_df, aes(y = qpcr_actual, color = "qPCR"), linewidth = 1, linetype = "twodash", alpha = 0.8) +
+          geom_point(data = qpcr_df, aes(y = qpcr_actual, color = "qPCR",
+                                         text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                       "<br><b>Metric:</b> qPCR",
+                                                       "<br><b>Log10 Value (Mean):</b> ", round(qpcr_actual, 3),
+                                                       "<br><b>Min:</b> ", round(qpcr_actual_min, 3),
+                                                       "<br><b>Max:</b> ", round(qpcr_actual_max, 3),
+                                                       "<br><b>N:</b> ", qpcr_actual_n)), size = 3, shape = 15, alpha = 0.8)
+      }
+      if(nrow(ddpcr_df) > 0) {
+        p <- p + 
+          geom_ribbon(data = ddpcr_df, aes(ymin = ddpcr_actual_min, ymax = ddpcr_actual_max), fill = "#8e44ad", alpha = 0.12) +
+          geom_line(data = ddpcr_df, aes(y = ddpcr_actual, color = "ddPCR"), linewidth = 1, linetype = "longdash", alpha = 0.8) +
+          geom_point(data = ddpcr_df, aes(y = ddpcr_actual, color = "ddPCR",
+                                          text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                        "<br><b>Metric:</b> ddPCR",
+                                                        "<br><b>Log10 Value (Mean):</b> ", round(ddpcr_actual, 3),
+                                                        "<br><b>Min:</b> ", round(ddpcr_actual_min, 3),
+                                                        "<br><b>Max:</b> ", round(ddpcr_actual_max, 3),
+                                                        "<br><b>N:</b> ", ddpcr_actual_n)), size = 3, shape = 16, alpha = 0.8)
+      }
+    }
+    
+    p <- p + scale_color_manual(values = color_mapping, name = "Data Source") + 
       theme_minimal() + 
-      labs(x = "Date", y = "Log Level") + 
+      labs(x = "Date", y = "Log10 Level") + 
       theme(
         text = element_text(size = 12),
         plot.margin = margin(t = 10, r = 10, b = 10, l = 0)
       )
     
     ggplotly(p, tooltip = "text") %>%
-      style(hoverinfo = "none", traces = c(1, 2, 3, 4)) %>%
       layout(
         autosize = TRUE,
         margin = list(l = 45, r = 120, t = 20, b = 40),
@@ -612,26 +755,59 @@ server <- function(input, output, session) {
       return(plot_ly() %>% layout(title = "No Data Available for Filters"))
     }
     
-    color_mapping <- c("E. coli (MPN)" = "black", "Bactiquick" = "blue", "Forecasted E. coli" = "#e74c3c")
+    color_mapping <- c("E. coli (MPN)" = "black", "Bactiquick" = "blue", "Forecasted E. coli" = "#e74c3c", "qPCR" = "#27ae60", "ddPCR" = "#8e44ad")
+    
+    ecoli_df <- plot_df %>% filter(!is.na(ecoli_actual_raw))
+    bact_df  <- plot_df %>% filter(!is.na(bact_actual_raw))
+    fcst_df  <- plot_df %>% filter(!is.na(ecoli_fcst_raw))
+    qpcr_df  <- plot_df %>% filter(!is.na(qpcr_actual_raw))
+    ddpcr_df <- plot_df %>% filter(!is.na(ddpcr_actual_raw))
     
     p <- ggplot(plot_df, aes(x = SampleDate)) +
-      geom_hline(yintercept = 300, linetype = "dashed", color = "red", linewidth = 0.8, alpha = 0.7) +
-      geom_line(aes(y = ecoli_actual_raw, color = "E. coli (MPN)"), linewidth = 1.2, linetype = "dashed", alpha = 0.8) +
-      geom_point(aes(y = ecoli_actual_raw, color = "E. coli (MPN)",
-                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
-                                   "<br><b>Metric:</b> E. coli (Colilert 18)",
-                                   "<br><b>Raw Value:</b> ", round(ecoli_actual_raw, 1), " MPN")), size = 3, shape = 18, alpha = 0.8) +
-      geom_line(aes(y = bact_actual_raw, color = "Bactiquick"), linewidth = 1.2, linetype = "dotted", alpha = 0.8) +
-      geom_point(aes(y = bact_actual_raw, color = "Bactiquick",
-                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
-                                   "<br><b>Metric:</b> Bactiquick",
-                                   "<br><b>Raw Value:</b> ", round(bact_actual_raw, 1), " ERU")), size = 3, shape = 17, alpha = 0.8) +
-      geom_line(aes(y = ecoli_fcst_raw, color = "Forecasted E. coli"), linewidth = 1.2, alpha = 0.8) +
-      geom_point(aes(y = ecoli_fcst_raw, color = "Forecasted E. coli",
-                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
-                                   "<br><b>Metric:</b> Forecasted E. coli",
-                                   "<br><b>Raw Value:</b> ", round(ecoli_fcst_raw, 1), " MPN")), size = 3, alpha = 0.8) +
-      scale_color_manual(values = color_mapping, name = "Data Source") + 
+      geom_hline(yintercept = input$ecoli_thresh_val, linetype = "dashed", color = "red", linewidth = 0.8, alpha = 0.7) +
+      geom_line(data = ecoli_df, aes(y = ecoli_actual_raw, color = "E. coli (MPN)"), linewidth = 1.2, linetype = "dashed", alpha = 0.8) +
+      geom_point(data = ecoli_df, aes(y = ecoli_actual_raw, color = "E. coli (MPN)",
+                                      text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                    "<br><b>Metric:</b> E. coli (Colilert 18)",
+                                                    "<br><b>Raw Value (Mean):</b> ", round(ecoli_actual_raw, 1), " MPN",
+                                                    "<br><b>N:</b> ", ecoli_actual_n)), size = 3, shape = 18, alpha = 0.8) +
+      geom_line(data = bact_df, aes(y = bact_actual_raw, color = "Bactiquick"), linewidth = 1.2, linetype = "dotted", alpha = 0.8) +
+      geom_point(data = bact_df, aes(y = bact_actual_raw, color = "Bactiquick",
+                                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                   "<br><b>Metric:</b> Bactiquick",
+                                                   "<br><b>Raw Value (Mean):</b> ", round(bact_actual_raw, 1), " ERU",
+                                                   "<br><b>N:</b> ", bact_actual_n)), size = 3, shape = 17, alpha = 0.8) +
+      geom_line(data = fcst_df, aes(y = ecoli_fcst_raw, color = "Forecasted E. coli"), linewidth = 1.2, alpha = 0.8) +
+      geom_point(data = fcst_df, aes(y = ecoli_fcst_raw, color = "Forecasted E. coli",
+                                     text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                   "<br><b>Metric:</b> Forecasted E. coli",
+                                                   "<br><b>Raw Value (Mean):</b> ", round(ecoli_fcst_raw, 1), " MPN",
+                                                   "<br><b>N:</b> ", ecoli_fcst_n)), size = 3, alpha = 0.8)
+    
+    if(input$show_qpcr_ddpcr) {
+      if(nrow(qpcr_df) > 0) {
+        p <- p + geom_line(data = qpcr_df, aes(y = qpcr_actual_raw, color = "qPCR"), linewidth = 1, linetype = "twodash", alpha = 0.8) +
+          geom_point(data = qpcr_df, aes(y = qpcr_actual_raw, color = "qPCR",
+                                         text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                       "<br><b>Metric:</b> qPCR",
+                                                       "<br><b>Raw Value (Mean):</b> ", round(qpcr_actual_raw, 1),
+                                                       "<br><b>Min:</b> ", round(qpcr_raw_min, 1),
+                                                       "<br><b>Max:</b> ", round(qpcr_raw_max, 1),
+                                                       "<br><b>N:</b> ", qpcr_actual_n)), size = 3, shape = 15, alpha = 0.8)
+      }
+      if(nrow(ddpcr_df) > 0) {
+        p <- p + geom_line(data = ddpcr_df, aes(y = ddpcr_actual_raw, color = "ddPCR"), linewidth = 1, linetype = "longdash", alpha = 0.8) +
+          geom_point(data = ddpcr_df, aes(y = ddpcr_actual_raw, color = "ddPCR",
+                                          text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                        "<br><b>Metric:</b> ddPCR",
+                                                        "<br><b>Raw Value (Mean):</b> ", round(ddpcr_actual_raw, 1),
+                                                        "<br><b>Min:</b> ", round(ddpcr_raw_min, 1),
+                                                        "<br><b>Max:</b> ", round(ddpcr_raw_max, 1),
+                                                        "<br><b>N:</b> ", ddpcr_actual_n)), size = 3, shape = 16, alpha = 0.8)
+      }
+    }
+    
+    p <- p + scale_color_manual(values = color_mapping, name = "Data Source") + 
       theme_minimal() + 
       labs(x = "Date", y = "Raw Assay Result (MPN / ERU)") + 
       theme(
@@ -640,7 +816,6 @@ server <- function(input, output, session) {
       )
     
     ggplotly(p, tooltip = "text") %>%
-      style(hoverinfo = "none", traces = 1) %>%
       layout(
         autosize = TRUE,
         margin = list(l = 55, r = 120, t = 20, b = 40),
@@ -650,20 +825,22 @@ server <- function(input, output, session) {
   })
   
   get_scatter_data <- reactive({
-    req(input$comp_site, input$color_mode, input$waterbody_filter, input$bacti_thresh_val, input$ecoli_limit, input$bacti_limit)
-    if(nrow(minet_data) == 0 || input$comp_site == "None") return(NULL)
+    req(input$color_mode, input$waterbody_filter, input$bacti_thresh_val, input$ecoli_thresh_val, input$ecoli_limit, input$bacti_limit)
+    if(nrow(minet_data) == 0 || (!is.null(input$comp_site) && "None" %in% input$comp_site)) return(NULL)
     
     valid_sites <- filtered_site_ids()
     target_data <- minet_data %>% filter(id %in% valid_sites)
     
-    if(input$comp_site != "All") target_data <- target_data %>% filter(id == input$comp_site)
+    if(!is.null(input$comp_site) && !("All" %in% input$comp_site) && length(input$comp_site) > 0) {
+      target_data <- target_data %>% filter(id %in% input$comp_site)
+    }
     
     target_data <- target_data %>% 
       inner_join(geo_info %>% select(id, BeachName), by = "id") %>% 
       filter(!is.na(ecoli_log) & !is.na(bactiquick_log)) %>%
       mutate(
-        ecoli_raw = exp(ecoli_log) - 0.001,
-        bacti_raw = exp(bactiquick_log) - 0.001
+        ecoli_raw = 10^(ecoli_log) - 0.001,
+        bacti_raw = 10^(bactiquick_log) - 0.001
       ) %>%
       filter(
         ecoli_raw >= input$ecoli_limit[1] & ecoli_raw <= input$ecoli_limit[2],
@@ -687,8 +864,8 @@ server <- function(input, output, session) {
     pval <- format.pval(ct$p.value, digits = 3)
     n_pts <- nrow(target_data)
     
-    bacti_thresh <- log(input$bacti_thresh_val + 0.001)
-    ecoli_thresh <- log(300 + 0.001)
+    bacti_thresh <- log10(input$bacti_thresh_val + 0.001)
+    ecoli_thresh <- log10(input$ecoli_thresh_val + 0.001)
     
     if (input$color_mode == "disagree") {
       target_data <- target_data %>% 
@@ -723,11 +900,11 @@ server <- function(input, output, session) {
       ggplot(target_data, aes(x = ecoli_log, y = bactiquick_log, color = ColorStatus)) +
         geom_vline(xintercept = ecoli_thresh, linetype = "dashed", color = "red", alpha = 0.5) +
         geom_hline(yintercept = bacti_thresh, linetype = "dashed", color = "blue", alpha = 0.5) +
-        geom_point(aes(text = paste("Site ID:", id, "<br>Name:", BeachName, "<br>Date:", SampleDate, "<br>Log E.coli:", round(ecoli_log, 2), "<br>Log Bacti:", round(bactiquick_log, 2), "<br>Status:", ColorStatus)), size = 3, alpha = 0.7) +
+        geom_point(aes(text = paste("Site ID:", id, "<br>Name:", BeachName, "<br>Date:", SampleDate, "<br>Log10 E.coli:", round(ecoli_log, 2), "<br>Log10 Bacti:", round(bactiquick_log, 2), "<br>Status:", ColorStatus)), size = 3, alpha = 0.7) +
         geom_smooth(aes(group = 1), method = "lm", formula = y ~ x, color = "#2c3e50", linetype = "dashed", linewidth = 1) +
         scale_color_manual(values = colors_map) +
         theme_minimal() +
-        labs(x = "Log(E. coli MPN + 0.001) [Colilert 18]", y = "Log(Bactiquick ERU + 0.001)", color = "Status") +
+        labs(x = "Log10(E. coli MPN + 0.001) [Colilert 18]", y = "Log10(Bactiquick ERU + 0.001)", color = "Status") +
         theme(text = element_text(size = 14), legend.position = "right")
     )
     
@@ -751,7 +928,7 @@ server <- function(input, output, session) {
     n_pts <- nrow(target_data)
     
     bacti_thresh <- input$bacti_thresh_val
-    ecoli_thresh <- 300
+    ecoli_thresh <- input$ecoli_thresh_val
     
     if (input$color_mode == "disagree") {
       target_data <- target_data %>% 
@@ -784,7 +961,7 @@ server <- function(input, output, session) {
     
     p <- suppressWarnings(
       ggplot(target_data, aes(x = ecoli_raw, y = bacti_raw, color = ColorStatus)) +
-        geom_vline(xintercept = 300, linetype = "dashed", color = "red", alpha = 0.5) +
+        geom_vline(xintercept = ecoli_thresh, linetype = "dashed", color = "red", alpha = 0.5) +
         geom_hline(yintercept = bacti_thresh, linetype = "dashed", color = "blue", alpha = 0.5) +
         geom_point(aes(text = paste("Site ID:", id, "<br>Name:", BeachName, "<br>Date:", SampleDate, "<br>E.coli:", round(ecoli_raw, 1), "MPN<br>Bacti:", round(bacti_raw, 1), "ERU<br>Status:", ColorStatus)), size = 3, alpha = 0.7) +
         geom_smooth(aes(group = 1), method = "lm", formula = y ~ x, color = "#2c3e50", linetype = "dashed", linewidth = 1) +
@@ -932,8 +1109,8 @@ server <- function(input, output, session) {
     }
     
     if (input$trend_metric == "Forecasted_Ecoli_Level") {
-      trend_df <- trend_df %>% mutate(metric_val = log(metric_val + 0.001))
-      y_label <- "Log(E. coli Level + 0.001)"
+      trend_df <- trend_df %>% mutate(metric_val = log10(metric_val + 0.001))
+      y_label <- "Log10(E. coli Level + 0.001)"
     } else {
       y_label <- "Probability of Exceedance"
     }
