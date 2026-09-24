@@ -126,27 +126,6 @@ site_names_vec   <- as.character(geo_info$BeachName)
 site_choices     <- c("All Sites (Statewide / Regional)" = "All", setNames(site_choices_vec, site_names_vec))
 
 # --- 2. SHINY UI ----
-# ui <- navbarPage(
-#   title = "Michigan Recreational Water Fecal Contamination",
-#   theme = bs_theme(version = 5, bootswatch = "sandstone"),
-#   collapsible = TRUE,
-#   
-#   header = tags$head(
-#     tags$style(HTML("
-#       .navbar-nav > li > a {
-#         font-size: 18px !important;
-#         font-weight: 600;
-#       }
-#       .navbar-nav > li {
-#         margin-right: 25px; /* Adds space between tab choices */
-#       }
-#       .navbar-brand {
-#         font-size: 20px !important;
-#         font-weight: bold;
-#       }
-#     "))
-#   ),
-#   
 
 ui <- navbarPage(
   title = "Michigan Recreational Water Fecal Contamination",
@@ -154,7 +133,7 @@ ui <- navbarPage(
   collapsible = TRUE,
   
   header = tags$head(
-    # 1. Force Bootstrap 5 dark theme context on the navbar element via JS
+    # 1. Set dark context on load
     tags$script(HTML("
       $(document).ready(function() {
         $('.navbar').attr('data-bs-theme', 'dark');
@@ -162,34 +141,23 @@ ui <- navbarPage(
     ")),
     
     tags$style(HTML("
-      /* Dark navbar container background */
+      /* --- GLOBAL NAVBAR BASE STYLES --- */
       .navbar {
         background-color: #212529 !important;
       }
       
-      /* Style links and brand text */
       .navbar-brand, 
       .navbar-nav .nav-link {
         color: rgba(255, 255, 255, 0.85) !important;
       }
+      
       .navbar-brand:hover, 
       .navbar-nav .nav-link:hover,
       .navbar-nav .nav-link.active {
         color: #ffffff !important;
       }
-      .navbar-nav > li > a {
-        font-size: 18px !important;
-        font-weight: 600;
-      }
-      .navbar-nav > li {
-        margin-right: 25px;
-      }
-      .navbar-brand {
-        font-size: 20px !important;
-        font-weight: bold;
-      }
-      
-      /* Match 3-dash toggler icon & border color directly to link text */
+
+      /* Toggler button icon */
       .navbar-toggler-icon {
         filter: invert(1) grayscale(100%) brightness(200%) !important;
       }
@@ -197,8 +165,8 @@ ui <- navbarPage(
         border-color: rgba(255, 255, 255, 0.85) !important;
         color: rgba(255, 255, 255, 0.85) !important;
       }
-      
-      /* Match Light/Dark Mode switch/symbol color */
+
+      /* Theme Switcher */
       .bslib-theme-switch,
       .bslib-theme-switch *,
       .theme-switch-toggle,
@@ -206,9 +174,56 @@ ui <- navbarPage(
         color: rgba(255, 255, 255, 0.85) !important;
         fill: rgba(255, 255, 255, 0.85) !important;
       }
+
+      /* --- DESKTOP-ONLY STYLES (>= 992px) --- */
+      @media (min-width: 992px) {
+        .navbar-nav > li > a {
+          font-size: 18px !important;
+          font-weight: 600;
+        }
+        .navbar-nav > li {
+          margin-right: 25px;
+        }
+        .navbar-brand {
+          font-size: 20px !important;
+          font-weight: bold;
+        }
+      }
+
+      /* --- MOBILE-ONLY STYLES (< 992px) --- */
+      @media (max-width: 991.98px) {
+        /* Prevents long title from forcing the toggler button onto a 2nd line or breaking layout */
+        .navbar-brand {
+          font-size: 15px !important;
+          font-weight: bold;
+          max-width: 75%;
+          white-space: normal; /* Allows title to wrap if necessary */
+          line-height: 1.2;
+        }
+        
+        /* Resets horizontal margin so vertical links align cleanly */
+        .navbar-nav > li {
+          margin-right: 0 !important;
+          margin-bottom: 8px;
+        }
+
+        .navbar-nav > li > a {
+          font-size: 16px !important;
+          font-weight: 600;
+          padding: 8px 0;
+        }
+
+        /* Container padding for the expanded vertical menu */
+        .navbar-collapse {
+          background-color: #212529 !important;
+          padding: 12px 16px;
+          margin-top: 8px;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+      }
     "))
   ),
-  
+
   
   # --- TAB 2: Site Sample Pair & Agreement Map ---
   tabPanel("Site agreement map",
