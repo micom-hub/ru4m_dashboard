@@ -126,27 +126,88 @@ site_names_vec   <- as.character(geo_info$BeachName)
 site_choices     <- c("All Sites (Statewide / Regional)" = "All", setNames(site_choices_vec, site_names_vec))
 
 # --- 2. SHINY UI ----
+# ui <- navbarPage(
+#   title = "Michigan Recreational Water Fecal Contamination",
+#   theme = bs_theme(version = 5, bootswatch = "sandstone"),
+#   collapsible = TRUE,
+#   
+#   header = tags$head(
+#     tags$style(HTML("
+#       .navbar-nav > li > a {
+#         font-size: 18px !important;
+#         font-weight: 600;
+#       }
+#       .navbar-nav > li {
+#         margin-right: 25px; /* Adds space between tab choices */
+#       }
+#       .navbar-brand {
+#         font-size: 20px !important;
+#         font-weight: bold;
+#       }
+#     "))
+#   ),
+#   
+
 ui <- navbarPage(
   title = "Michigan Recreational Water Fecal Contamination",
   theme = bs_theme(version = 5, bootswatch = "sandstone"),
   collapsible = TRUE,
   
   header = tags$head(
+    # 1. Force Bootstrap 5 dark theme context on the navbar element via JS
+    tags$script(HTML("
+      $(document).ready(function() {
+        $('.navbar').attr('data-bs-theme', 'dark');
+      });
+    ")),
+    
     tags$style(HTML("
+      /* Dark navbar container background */
+      .navbar {
+        background-color: #212529 !important;
+      }
+      
+      /* Style links and brand text */
+      .navbar-brand, 
+      .navbar-nav .nav-link {
+        color: rgba(255, 255, 255, 0.85) !important;
+      }
+      .navbar-brand:hover, 
+      .navbar-nav .nav-link:hover,
+      .navbar-nav .nav-link.active {
+        color: #ffffff !important;
+      }
       .navbar-nav > li > a {
         font-size: 18px !important;
         font-weight: 600;
       }
       .navbar-nav > li {
-        margin-right: 25px; /* Adds space between tab choices */
+        margin-right: 25px;
       }
       .navbar-brand {
         font-size: 20px !important;
         font-weight: bold;
       }
+      
+      /* Match 3-dash toggler icon & border color directly to link text */
+      .navbar-toggler-icon {
+        filter: invert(1) grayscale(100%) brightness(200%) !important;
+      }
+      .navbar-toggler {
+        border-color: rgba(255, 255, 255, 0.85) !important;
+        color: rgba(255, 255, 255, 0.85) !important;
+      }
+      
+      /* Match Light/Dark Mode switch/symbol color */
+      .bslib-theme-switch,
+      .bslib-theme-switch *,
+      .theme-switch-toggle,
+      .navbar .theme-switch {
+        color: rgba(255, 255, 255, 0.85) !important;
+        fill: rgba(255, 255, 255, 0.85) !important;
+      }
     "))
   ),
-  
   # --- TAB 1: Performance & Comparison ---
   tabPanel("Comparison",
            sidebarLayout(
@@ -172,17 +233,18 @@ ui <- navbarPage(
                                        "Weak/Negative (\u03c1 < 0.5)" = "weak_neg"),
                            selected = "all"),
                
-               sliderInput("ecoli_limit", "E. coli Level Range (MPN):",
+               sliderInput("ecoli_limit", "Colilert Level Range (MPN):",
                            min = 0, max = max_ecoli_val, value = c(0, max_ecoli_val)),
                
                sliderInput("bacti_limit", "Bactiquick Level Range (ERU):",
                            min = 0, max = max_bacti_val, value = c(0, max_bacti_val)),
                
-               selectizeInput("comp_site", "Select Specific Site(s):", choices = NULL, multiple = TRUE),
+               selectizeInput("comp_site", "Select Specific Site(s):", 
+                              choices = NULL, multiple = TRUE,options = list(plugins = list("remove_button"))),
                actionLink("clear_sites", "Clear All Selected Sites", style = "color: #e74c3c;"),
                br(), br(),
                
-               numericInput("ecoli_thresh_val", "E. coli Threshold (MPN):",
+               numericInput("ecoli_thresh_val", "Colilert Threshold (MPN):",
                             value = 300, step = 1),
                
                numericInput("bacti_thresh_val", "Bactiquick Threshold (ERU):",
@@ -248,7 +310,7 @@ ui <- navbarPage(
            sidebarLayout(
              sidebarPanel(
                width = 3,
-               numericInput("tab2_map_ecoli_thresh", "E. coli Threshold (MPN):",
+               numericInput("tab2_map_ecoli_thresh", "Colilert Threshold (MPN):",
                             value = 300, step = 1),
                numericInput("tab2_map_bacti_thresh", "Bactiquick Threshold (ERU):",
                             value = 100, step = 1),
@@ -266,12 +328,16 @@ ui <- navbarPage(
                         h4("Exceedance Agreement Map", align = "center"),
                         plotlyOutput("pairs_agreement_map", width = "100%", height = "600px")
                  )
-               )
+               ),
+               hr(),
+               h5("Site Summary", style = "font-weight: bold; margin-top: 15px;"),
+               tableOutput("site_agreement_summary_table")
              )
            )
   ),
   
   # --- TAB 3: Historic Maps ---
+  # --- TAB 3: Historic Maps & Summary ---
   tabPanel("Testing result map",
            sidebarLayout(
              sidebarPanel(
@@ -293,11 +359,8 @@ ui <- navbarPage(
                  column(6, h5("Daily Bactiquick (ERU)", align = "center"), plotlyOutput("hist_bacti_map", width = "100%", height = "350px"))
                ),
                hr(),
-               h4("7-Day Average"),
-               fluidRow(
-                 column(6, h5("7-Day Avg E. coli (MPN)", align = "center"), plotlyOutput("hist_ecoli_7d_map", width = "100%", height = "350px")),
-                 column(6, h5("7-Day Avg Bactiquick (ERU)", align = "center"), plotlyOutput("hist_bacti_7d_map", width = "100%", height = "350px"))
-               )
+               h4("Available Sites Summary"),
+               div(style = "overflow-x: auto;", tableOutput("tab3_site_summary_table"))
              )
            )
   ),
@@ -312,8 +375,10 @@ ui <- navbarPage(
                            max = index_date + 6,
                            value = index_date, timeFormat = "%Y-%m-%d", 
                            animate = animationOptions(interval = 2500, loop = TRUE)),
-               selectizeInput("region_select", "Select Region(s):", choices = NULL, multiple = TRUE),
-               selectizeInput("site", "Search Site (Trend Chart):", choices = NULL, multiple = TRUE),
+               selectizeInput("region_select", "Select Region(s):", choices = NULL, multiple = TRUE,
+                              options = list(plugins = list("remove_button"))),
+               selectizeInput("site", "Search Site (Trend Chart):", choices = NULL, multiple = TRUE,
+                              options = list(plugins = list("remove_button"))),
                actionLink("regional_clear_sites", "Clear All Selected Sites", style = "color: #e74c3c;"),
                br(), br(),
                radioButtons("trend_metric", "Select Metric (Applies to Maps & Plot):", 
@@ -346,16 +411,17 @@ ui <- navbarPage(
                            choices = c("Any", "Inland Lake", "Great Lake", "River"),
                            selected = "Any"),
                
-               selectizeInput("perf_comp_site", "Select Specific Site(s):", choices = NULL, multiple = TRUE),
+               selectizeInput("perf_comp_site", "Select Specific Site(s):", choices = NULL, multiple = TRUE,
+                              options = list(plugins = list("remove_button"))),
                actionLink("perf_clear_sites", "Clear All Selected Sites", style = "color: #e74c3c;"),
                br(), br(),
                
-               numericInput("perf_ecoli_thresh", "E. coli Exceedance Threshold (MPN):",
+               numericInput("perf_ecoli_thresh", "Colilert Threshold (MPN):",
                             value = 300, min = 1, max = 10000, step = 1),
                
                radioButtons("perf_thresh_type", "Threshold Selection Mode:",
                             choices = c("Optimal Threshold (Youden's J)" = "optimal",
-                                        "Input E. coli Threshold" = "input"),
+                                        "Input Colilert Threshold" = "input"),
                             selected = "input"),
                
                helpText("Evaluate forecast accuracy against observed E. coli levels. Set a customizable exceedance threshold (MPN) to compute AUROC, confidence intervals, and classification performance.")
@@ -463,7 +529,11 @@ ui <- navbarPage(
                                 tags$li("Machine learning prediction models using ensembles of elastic net, random forest, additive, gradient boosting, and multi-layer perceptron models are trained 
                                         on historic BeachGuard data on E. coli Colilert 18 levels from 2021 to 2025 calendar years with engineered weather features based on weather pattern rasters from ",
                                         tags$a(href = "https://prism.oregonstate.edu/", "PRISM"),". E. coli levels are forecasting using site geographical location and weather features based on weather 
-                                        forecasts from ",tags$a(href="https://open-meteo.com/","Open Meteo"),".")
+                                        forecasts from ",tags$a(href="https://open-meteo.com/","Open Meteo"),"."),
+                                div(
+                                  style = "display: flex; justify-content: center; align-items: center;",
+                                  img(src = "ru4m_flow.png", height = "180px", width = "auto")
+                                )
                               ))
                     ),
                     br(),
@@ -480,7 +550,8 @@ ui <- navbarPage(
                     hr(),
                     wellPanel(
                       p(em("Disclaimer: This project is conducted in collaboration with EGLE staff memebers. EGLE does not provide funding support for this project. Predictive models can create errors. Always refer to local advisory for beach closures (BeachGuard)."))
-                    )
+                    ),
+                    br()
              )
            )
   ),
@@ -813,6 +884,77 @@ server <- function(input, output, session) {
       config(responsive = TRUE)
   })
   
+  output$site_agreement_summary_table <- renderTable({
+    req(input$tab2_map_ecoli_thresh, input$tab2_map_bacti_thresh)
+    
+    ecoli_log_thresh <- log10(input$tab2_map_ecoli_thresh + 0.001)
+    bacti_log_thresh <- log10(input$tab2_map_bacti_thresh + 0.001)
+    
+    site_stats <- minet_data %>%
+      group_by(id) %>%
+      summarise(
+        has_ecoli = any(!is.na(ecoli_log)),
+        has_bacti = any(!is.na(bactiquick_log)),
+        has_any = has_ecoli | has_bacti,
+        has_both = has_ecoli & has_bacti,
+        has_ecoli_only = has_ecoli & !has_bacti,
+        has_ecoli_exceedance = any(ecoli_log >= ecoli_log_thresh, na.rm = TRUE),
+        has_bact_exceedance = any(bactiquick_log >= bacti_log_thresh, na.rm = TRUE),
+        pct_agree = ifelse(
+          sum(!is.na(ecoli_log) & !is.na(bactiquick_log)) > 0,
+          mean((ecoli_log[!is.na(ecoli_log) & !is.na(bactiquick_log)] >= ecoli_log_thresh) == 
+                 (bactiquick_log[!is.na(ecoli_log) & !is.na(bactiquick_log)] >= bacti_log_thresh)) * 100,
+          NA_real_
+        ),
+        .groups = "drop"
+      )
+    
+    # Total sites calculated dynamically from minet_data for any site with data
+    total_sites <- sum(site_stats$has_any, na.rm = TRUE)
+    
+    n_both <- sum(site_stats$has_both, na.rm = TRUE)
+    n_ecoli_exc <- sum(site_stats$has_ecoli_exceedance, na.rm = TRUE)
+    n_bact_exc <- sum(site_stats$has_bact_exceedance, na.rm = TRUE)
+    n_ecoli_only <- sum(site_stats$has_ecoli_only, na.rm = TRUE)
+    
+    both_sites <- site_stats %>% filter(has_both)
+    n_0_24   <- sum(both_sites$pct_agree >= 0  & both_sites$pct_agree < 25, na.rm = TRUE)
+    n_25_49  <- sum(both_sites$pct_agree >= 25 & both_sites$pct_agree < 50, na.rm = TRUE)
+    n_50_74  <- sum(both_sites$pct_agree >= 50 & both_sites$pct_agree < 75, na.rm = TRUE)
+    n_75_100 <- sum(both_sites$pct_agree >= 75 & both_sites$pct_agree <= 100, na.rm = TRUE)
+    
+    fmt_pct <- function(cnt, total) {
+      if (total == 0) return(sprintf("%d (0.0%%)", cnt))
+      sprintf("%d (%.1f%%)", cnt, (cnt / total) * 100)
+    }
+    
+    data.frame(
+      Category = c(
+        "Total Number of Sites",
+        "Sites with Exceedances (Colilert)",
+        "Sites with Exceedances (Bactiquick)",
+        "Sites with Only Colilert Available",
+        "Sites with Both Data Available",
+        "0-24% Agreement",
+        "25-49% Agreement",
+        "50-74% Agreement",
+        "75-100% Agreement"
+      ),
+      Count = c(
+        as.character(total_sites),
+        as.character(n_ecoli_exc),
+        as.character(n_bact_exc),
+        as.character(n_ecoli_only),
+        as.character(n_both),
+        fmt_pct(n_0_24, n_both),
+        fmt_pct(n_25_49, n_both),
+        fmt_pct(n_50_74, n_both),
+        fmt_pct(n_75_100, n_both)
+      ),
+      stringsAsFactors = FALSE
+    )
+  }, striped = TRUE, bordered = TRUE, colnames = FALSE)
+  
   # Reactive evaluation for active selected region(s)
   active_regions <- reactive({
     sel <- input$region_select
@@ -889,79 +1031,59 @@ server <- function(input, output, session) {
       config(responsive = TRUE)
   })
   
-  output$hist_ecoli_7d_map <- renderPlotly({
+  output$tab3_site_summary_table <- renderTable({
     req(input$tab2_date)
-    if(input$tab2_date == "No Data Available") return(plot_ly() %>% layout(title = "No Data Available"))
-    selected_date <- as.Date(input$tab2_date)
-    start_date <- selected_date - 6
+    if (input$tab2_date == "No Data Available") return(NULL)
     
-    plot_data <- minet_data %>%
+    selected_date <- as.Date(input$tab2_date)
+    start_date <- selected_date - 29  # Exactly 30 days inclusive
+    
+    # 1. Calculate past 30-day summary metrics per site
+    monthly_summary <- minet_data %>%
       filter(as.Date(SampleDate) >= start_date & as.Date(SampleDate) <= selected_date) %>%
       group_by(id) %>%
-      summarise(ecoli_log = mean(ecoli_log, na.rm = TRUE), .groups = "drop") %>%
-      filter(!is.na(ecoli_log) & !is.nan(ecoli_log)) %>%
-      inner_join(geo_info %>% select(id, Latitude, Longitude, BeachName), by = "id") %>%
-      filter(!is.na(Latitude))
+      summarise(
+        avg_colilert_month = ifelse(all(is.na(ecoli_log)), NA_real_, mean(10^(ecoli_log) - 0.001, na.rm = TRUE)),
+        avg_bacti_month    = ifelse(all(is.na(bactiquick_log)), NA_real_, mean(10^(bactiquick_log) - 0.001, na.rm = TRUE)),
+        colilert_avail_days_month = sum(!is.na(ecoli_log) & as.Date(SampleDate) >= start_date & as.Date(SampleDate) <= selected_date),
+        bacti_avail_days_month    = sum(!is.na(bactiquick_log) & as.Date(SampleDate) >= start_date & as.Date(SampleDate) <= selected_date),
+        .groups = "drop"
+      )
     
-    if(nrow(plot_data) == 0) return(plot_ly() %>% layout(title = "No E. coli data in past 7 days"))
+    # 2. Get daily measurements for selected date & merge monthly summary
+    daily_data <- minet_data %>%
+      filter(as.Date(SampleDate) == selected_date) %>%
+      left_join(geo_info %>% select(id, BeachName), by = "id") %>%
+      left_join(monthly_summary, by = "id") %>%
+      filter(!is.na(ecoli_log) | !is.na(bactiquick_log)) %>%
+      mutate(
+        colilert_level = ifelse(is.na(ecoli_log), NA_real_, 10^(ecoli_log) - 0.001),
+        bactiquick_level = ifelse(is.na(bactiquick_log), NA_real_, 10^(bactiquick_log) - 0.001)
+      ) %>%
+      select(
+        Site = BeachName,
+        `Site ID` = id,
+        `Colilert Level (MPN)` = colilert_level,
+        `Bactiquick Level (ERU)` = bactiquick_level,
+        `Past 30-Day Colilert Avg` = avg_colilert_month,
+        `Past 30-Day Bactiquick Avg` = avg_bacti_month,
+        `Colilert Avail. Days (Past 30d)` = colilert_avail_days_month,
+        `Bactiquick Avail. Days (Past 30d)` = bacti_avail_days_month
+      )
     
-    p <- suppressWarnings(
-      ggplot() +
-        geom_sf(data = mi_counties_sf, fill = "grey90", color = "grey60", linewidth = 0.2) +
-        geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
-        geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = ecoli_log,
-                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>7-Day Log10 E.coli:", round(ecoli_log, 2))),
-                   size = 2, alpha = 0.9) +
-        # --- REPLACED COLOR SCALE HERE ---
-        scale_color_gradient2(
-          low = "darkgreen",       # Muted green (safe/low)
-          mid = "yellow",       # Neutral yellow (midpoint threshold)
-          high = "red",      # Red (high/exceedance)
-          midpoint = log10(300), # Center gradient at log10(300) ~ 2.477
-          limits = global_hist_ecoli_lims,
-          name = "Log10(E.coli)"
-        ) +
-        theme_void() + theme(legend.position = "right")
-    )
+    if (nrow(daily_data) == 0) return(NULL)
     
-    ggplotly(p, tooltip = "text") %>% 
-      style(hoverinfo = "none", traces = c(1, 2)) %>%
-      layout(autosize = TRUE, margin = list(l=0, r=0, b=0, t=0)) %>%
-      config(responsive = TRUE)
-  })
-  
-  output$hist_bacti_7d_map <- renderPlotly({
-    req(input$tab2_date)
-    if(input$tab2_date == "No Data Available") return(plot_ly() %>% layout(title = "No Data Available"))
-    selected_date <- as.Date(input$tab2_date)
-    start_date <- selected_date - 6
-    
-    plot_data <- minet_data %>%
-      filter(as.Date(SampleDate) >= start_date & as.Date(SampleDate) <= selected_date) %>%
-      group_by(id) %>%
-      summarise(bactiquick_log = mean(bactiquick_log, na.rm = TRUE), .groups = "drop") %>%
-      filter(!is.na(bactiquick_log) & !is.nan(bactiquick_log)) %>%
-      inner_join(geo_info %>% select(id, Latitude, Longitude, BeachName), by = "id") %>%
-      filter(!is.na(Latitude))
-    
-    if(nrow(plot_data) == 0) return(plot_ly() %>% layout(title = "No Bactiquick data in past 7 days"))
-    
-    p <- suppressWarnings(
-      ggplot() +
-        geom_sf(data = mi_counties_sf, fill = "grey90", color = "grey60", linewidth = 0.2) +
-        geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
-        geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = bactiquick_log,
-                                         text = paste("Site:", BeachName, "<br>ID:", id, "<br>7-Day Log10 Bacti:", round(bactiquick_log, 2))),
-                   size = 2, alpha = 0.9) +
-        scale_color_viridis_c(option = "mako", direction = -1, limits = global_hist_bacti_lims, name = "Log10(Bacti)") +
-        theme_void() + theme(legend.position = "right")
-    )
-    
-    ggplotly(p, tooltip = "text") %>% 
-      style(hoverinfo = "none", traces = c(1, 2)) %>%
-      layout(autosize = TRUE, margin = list(l=0, r=0, b=0, t=0)) %>%
-      config(responsive = TRUE)
-  })
+    # Format numbers for clean presentation
+    daily_data %>%
+      mutate(
+        `Colilert Level (MPN)` = ifelse(is.na(`Colilert Level (MPN)`), "N/A", sprintf("%.1f", `Colilert Level (MPN)`)),
+        `Bactiquick Level (ERU)` = ifelse(is.na(`Bactiquick Level (ERU)`), "N/A", sprintf("%.1f", `Bactiquick Level (ERU)`)),
+        `Past 30-Day Colilert Avg` = ifelse(is.na(`Past 30-Day Colilert Avg`), "N/A", sprintf("%.1f", `Past 30-Day Colilert Avg`)),
+        `Past 30-Day Bactiquick Avg` = ifelse(is.na(`Past 30-Day Bactiquick Avg`), "N/A", sprintf("%.1f", `Past 30-Day Bactiquick Avg`)),
+        `Colilert Avail. Days (Past 30d)` = as.character(`Colilert Avail. Days (Past 30d)`),
+        `Bactiquick Avail. Days (Past 30d)` = as.character(`Bactiquick Avail. Days (Past 30d)`)
+      )
+  }, striped = TRUE, bordered = TRUE, hover = TRUE, align = "c")
   
   # --- PERFORMANCE & COMPARISON LOGIC ---
   comp_plot_data <- reactive({
