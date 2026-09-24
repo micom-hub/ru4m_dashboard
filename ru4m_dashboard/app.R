@@ -208,6 +208,67 @@ ui <- navbarPage(
       }
     "))
   ),
+  
+  
+  # --- TAB 2: Site Sample Pair & Agreement Map ---
+  tabPanel("Site agreement map",
+           sidebarLayout(
+             sidebarPanel(
+               width = 3,
+               numericInput("tab2_map_ecoli_thresh", "Colilert Threshold (MPN):",
+                            value = 300, step = 1),
+               numericInput("tab2_map_bacti_thresh", "Bactiquick Threshold (ERU):",
+                            value = 100, step = 1),
+               hr(),
+               helpText("Dot size represents paired samples count for a given site and dot color indicates percentage agreement on exceedance.")
+             ),
+             mainPanel(
+               width = 9,
+               fluidRow(
+                 column(6,
+                        h4("Site Data Availability", align = "center"),
+                        plotlyOutput("all_sites_availability_map", width = "100%", height = "600px")
+                 ),
+                 column(6,
+                        h4("Exceedance Agreement Map", align = "center"),
+                        plotlyOutput("pairs_agreement_map", width = "100%", height = "600px")
+                 )
+               ),
+               hr(),
+               h5("Site Summary", style = "font-weight: bold; margin-top: 15px;"),
+               tableOutput("site_agreement_summary_table")
+             )
+           )
+  ),
+  
+  # --- TAB 3: Historic Maps ---
+  # --- TAB 3: Historic Maps & Summary ---
+  tabPanel("Testing result map",
+           sidebarLayout(
+             sidebarPanel(
+               width = 3,
+               sliderTextInput(
+                 inputId = "tab2_date", 
+                 label = "Select Historic Date (Past Year Sampling):",
+                 choices = valid_hist_dates_char, 
+                 selected = tail(valid_hist_dates_char, 1), 
+                 animate = animationOptions(interval = 2500, loop = TRUE)
+               ),
+               helpText("Select a date to view historical site test results. Only sites with available data on selected date are displayed.")
+             ),
+             mainPanel(
+               width = 9,
+               h4("Daily Sampling"),
+               fluidRow(
+                 column(6, h5("Daily E. coli (MPN)", align = "center"), plotlyOutput("hist_ecoli_map", width = "100%", height = "350px")),
+                 column(6, h5("Daily Bactiquick (ERU)", align = "center"), plotlyOutput("hist_bacti_map", width = "100%", height = "350px"))
+               ),
+               hr(),
+               h4("Available Sites Summary"),
+               div(style = "overflow-x: auto;", tableOutput("tab3_site_summary_table"))
+             )
+           )
+  ),
   # --- TAB 1: Performance & Comparison ---
   tabPanel("Comparison",
            sidebarLayout(
@@ -304,67 +365,6 @@ ui <- navbarPage(
              )
            )
   ),
-  
-  # --- TAB 2: Site Sample Pair & Agreement Map ---
-  tabPanel("Site agreement map",
-           sidebarLayout(
-             sidebarPanel(
-               width = 3,
-               numericInput("tab2_map_ecoli_thresh", "Colilert Threshold (MPN):",
-                            value = 300, step = 1),
-               numericInput("tab2_map_bacti_thresh", "Bactiquick Threshold (ERU):",
-                            value = 100, step = 1),
-               hr(),
-               helpText("Dot size represents paired samples count for a given site and dot color indicates percentage agreement on exceedance.")
-             ),
-             mainPanel(
-               width = 9,
-               fluidRow(
-                 column(6,
-                        h4("Site Data Availability", align = "center"),
-                        plotlyOutput("all_sites_availability_map", width = "100%", height = "600px")
-                 ),
-                 column(6,
-                        h4("Exceedance Agreement Map", align = "center"),
-                        plotlyOutput("pairs_agreement_map", width = "100%", height = "600px")
-                 )
-               ),
-               hr(),
-               h5("Site Summary", style = "font-weight: bold; margin-top: 15px;"),
-               tableOutput("site_agreement_summary_table")
-             )
-           )
-  ),
-  
-  # --- TAB 3: Historic Maps ---
-  # --- TAB 3: Historic Maps & Summary ---
-  tabPanel("Testing result map",
-           sidebarLayout(
-             sidebarPanel(
-               width = 3,
-               sliderTextInput(
-                 inputId = "tab2_date", 
-                 label = "Select Historic Date (Past Year Sampling):",
-                 choices = valid_hist_dates_char, 
-                 selected = tail(valid_hist_dates_char, 1), 
-                 animate = animationOptions(interval = 2500, loop = TRUE)
-               ),
-               helpText("Select a date to view historical site test results. Only sites with available data on selected date are displayed.")
-             ),
-             mainPanel(
-               width = 9,
-               h4("Daily Sampling"),
-               fluidRow(
-                 column(6, h5("Daily E. coli (MPN)", align = "center"), plotlyOutput("hist_ecoli_map", width = "100%", height = "350px")),
-                 column(6, h5("Daily Bactiquick (ERU)", align = "center"), plotlyOutput("hist_bacti_map", width = "100%", height = "350px"))
-               ),
-               hr(),
-               h4("Available Sites Summary"),
-               div(style = "overflow-x: auto;", tableOutput("tab3_site_summary_table"))
-             )
-           )
-  ),
-  
   # --- TAB 4: Forecast Dashboard & Trends ---
   tabPanel("Forecast",
            sidebarLayout(
