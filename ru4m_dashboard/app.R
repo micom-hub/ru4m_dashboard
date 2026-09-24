@@ -76,7 +76,11 @@ index_date    <- as.Date(shiny_data_bundle$config$index_date)
 tab2_min_date <- as.Date(shiny_data_bundle$config$tab2_min_date)
 tab2_max_date <- as.Date(shiny_data_bundle$config$tab2_max_date)
 
-# Populate long/lat coordinates for map click distance calculation
+# --- FILTER CURRENT FORECAST TO STRICTLY 7 DAYS FROM INDEX DATE (EXCLUDE HISTORIC FORECASTS) ---
+current_fcst <- current_fcst %>%
+  filter(as.Date(SampleDate) >= index_date & as.Date(SampleDate) <= (index_date + 6))
+
+# Populate long/lat coordinates for map calculations
 mi_counties_map <- suppressWarnings(st_drop_geometry(mi_counties_sf))
 if (inherits(mi_counties_sf, "sf")) {
   mi_coords <- suppressWarnings(st_coordinates(st_centroid(mi_counties_sf)))
@@ -201,7 +205,7 @@ ui <- navbarPage(
                width = 9,
                tabsetPanel(
                  tabPanel("Log10 Scale Results",
-                          h4("E. Coli Colilert 18 (MPN) and Bactiquick (ERU) Relationship (Log10 Scale)"),
+                          h4("E. Coli Colilert 18 and Bactiquick Relationship"),
                           fluidRow(
                             column(8,
                                    div(
@@ -214,11 +218,11 @@ ui <- navbarPage(
                             )
                           ),
                           hr(),
-                          h4("Assay Result Comparison Overtime"),
+                          h4("Assay Result Comparison"),
                           plotlyOutput("compare_plot", width = "100%", height = "40vh")
                  ),
                  tabPanel("Raw Assay Results",
-                          h4("E. Coli Colilert 18 (MPN) and Bactiquick (ERU) Relationship (Raw)"),
+                          h4("E. Coli Colilert 18 and Bactiquick Relationship"),
                           fluidRow(
                             column(8,
                                    div(
@@ -231,7 +235,7 @@ ui <- navbarPage(
                             )
                           ),
                           hr(),
-                          h4("Forecasts and Actual Tests (Raw)"),
+                          h4("Assay Result Comparison"),
                           plotlyOutput("compare_plot_raw", width = "100%", height = "40vh")
                  )
                )
@@ -283,13 +287,13 @@ ui <- navbarPage(
              ),
              mainPanel(
                width = 9,
-               h4("Daily Historic Sampling"),
+               h4("Daily Sampling"),
                fluidRow(
                  column(6, h5("Daily E. coli (MPN)", align = "center"), plotlyOutput("hist_ecoli_map", width = "100%", height = "350px")),
                  column(6, h5("Daily Bactiquick (ERU)", align = "center"), plotlyOutput("hist_bacti_map", width = "100%", height = "350px"))
                ),
                hr(),
-               h4("Past 7-Day Average (Leading up to selected date)"),
+               h4("7-Day Average"),
                fluidRow(
                  column(6, h5("7-Day Avg E. coli (MPN)", align = "center"), plotlyOutput("hist_ecoli_7d_map", width = "100%", height = "350px")),
                  column(6, h5("7-Day Avg Bactiquick (ERU)", align = "center"), plotlyOutput("hist_bacti_7d_map", width = "100%", height = "350px"))
@@ -298,7 +302,42 @@ ui <- navbarPage(
            )
   ),
   
-  # --- TAB 4: Forecast Performance ---
+  # --- TAB 4: Forecast Dashboard & Trends ---
+  tabPanel("Forecast",
+           sidebarLayout(
+             sidebarPanel(
+               width = 3,
+               sliderInput("map_date", "Select Date for Map:", 
+                           min = index_date, 
+                           max = index_date + 6,
+                           value = index_date, timeFormat = "%Y-%m-%d", 
+                           animate = animationOptions(interval = 2500, loop = TRUE)),
+               selectizeInput("region_select", "Select Region(s):", choices = NULL, multiple = TRUE),
+               selectizeInput("site", "Search Site (Trend Chart):", choices = NULL, multiple = TRUE),
+               actionLink("regional_clear_sites", "Clear All Selected Sites", style = "color: #e74c3c;"),
+               br(), br(),
+               radioButtons("trend_metric", "Select Metric (Applies to Maps & Plot):", 
+                            choices = c("Forecasted E. coli Level" = "Forecasted_Ecoli_Level", 
+                                        "Probability of Exceedance" = "Probability_of_Exceedance"),
+                            selected = "Forecasted_Ecoli_Level"),
+               helpText("This tab displays regional mean forecasting E. coli levels and exceedance probabilities for Michigan Emergency Preparedness Regions. Select one or multiple regions using the dropdown.")
+             ),
+             mainPanel(
+               width = 9,
+               h4(textOutput("map_title")),
+               fluidRow(
+                 column(6, h5("Daily Region Forecast", align = "center"), plotOutput("map_daily", height = "300px")),
+                 column(6, h5("Daily Site Forecast", align = "center"), plotlyOutput("site_dots_map", width = "100%", height = "300px"))
+               ),
+               fluidRow(
+                 column(6, h5(textOutput("map_7day_title"), align = "center"), plotOutput("map_click_2_output", height = "300px")),
+                 column(6, h5(textOutput("trend_title"), align = "center"), plotlyOutput("timeseries_plot", height = "300px"))
+               )
+             )
+           )
+  ),
+  
+  # --- TAB 5: Forecast Performance ---
   tabPanel("Forecast Performance",
            sidebarLayout(
              sidebarPanel(
@@ -314,14 +353,19 @@ ui <- navbarPage(
                numericInput("perf_ecoli_thresh", "E. coli Exceedance Threshold (MPN):",
                             value = 300, min = 1, max = 10000, step = 1),
                
+               radioButtons("perf_thresh_type", "Threshold Selection Mode:",
+                            choices = c("Optimal Threshold (Youden's J)" = "optimal",
+                                        "Input E. coli Threshold" = "input"),
+                            selected = "input"),
+               
                helpText("Evaluate forecast accuracy against observed E. coli levels. Set a customizable exceedance threshold (MPN) to compute AUROC, confidence intervals, and classification performance.")
              ),
              mainPanel(
                width = 9,
-               h4("Forecast and Observed E. coli Over Time (Log10 Scale)"),
+               h4("Forecast and Observed E. coli Over Time"),
                plotlyOutput("perf_compare_plot", width = "100%", height = "40vh"),
                hr(),
-               h4("Exceedance Detection ROC & AUROC Analysis"),
+               h4("Prediction Performance"),
                fluidRow(
                  column(7,
                         div(
@@ -330,44 +374,9 @@ ui <- navbarPage(
                         )
                  ),
                  column(5,
-                        h5("AUROC & Classification Statistics"),
+                        h5("Classification Statistics"),
                         tableOutput("perf_auc_stats")
                  )
-               )
-             )
-           )
-  ),
-  
-  # --- TAB 5: Forecast Dashboard & Trends ---
-  tabPanel("Regional forecast",
-           sidebarLayout(
-             sidebarPanel(
-               width = 3,
-               sliderInput("map_date", "Select Date for Map:", 
-                           min = min(as.Date(current_fcst$SampleDate), na.rm = TRUE), 
-                           max = max(as.Date(current_fcst$SampleDate), na.rm = TRUE),
-                           value = index_date, timeFormat = "%Y-%m-%d", 
-                           animate = animationOptions(interval = 2500, loop = TRUE)),
-               selectizeInput("region_select", "Select Region(s):", choices = NULL, multiple = TRUE),
-               selectizeInput("site", "Search Site (Trend Chart):", choices = NULL),
-               actionLink("regional_clear_sites", "Clear All Selected Sites", style = "color: #e74c3c;"),
-               br(), br(),
-               radioButtons("trend_metric", "Select Metric (Applies to Maps & Plot):", 
-                            choices = c("Forecasted E. coli Level" = "Forecasted_Ecoli_Level", 
-                                        "Probability of Exceedance" = "Probability_of_Exceedance"),
-                            selected = "Forecasted_Ecoli_Level"),
-               helpText("This tab displays regional mean forecasting E. coli levels and exceedance probabilities for Michigan Emergency Preparedness Regions. Select one or multiple regions using the dropdown or by clicking directly on the map.")
-             ),
-             mainPanel(
-               width = 9,
-               h4(textOutput("map_title")),
-               fluidRow(
-                 column(6, h5("Daily Region Forecast", align = "center"), plotOutput("map_daily", height = "300px", click = "map_click_1")),
-                 column(6, h5("Daily Site Forecast", align = "center"), plotlyOutput("site_dots_map", width = "100%", height = "300px"))
-               ),
-               fluidRow(
-                 column(6, h5("7-Day Region Forecast", align = "center"), plotOutput("map_click_2_output", height = "300px", click = "map_click_2")),
-                 column(6, h5(textOutput("trend_title"), align = "center"), plotOutput("timeseries_plot", height = "300px"))
                )
              )
            )
@@ -488,12 +497,57 @@ server <- function(input, output, session) {
   updateSelectizeInput(session, "site", choices = site_choices, server = TRUE, selected = "All")
   updateSelectizeInput(session, "weather_site", choices = site_choices, server = TRUE, selected = "All")
   
-  # Initialize Region Choices for Dropdown in Tab 5
+  # Initialize Region Choices for Dropdown in Tab 4
   region_choices_vec <- sort(unique(as.character(mi_regions_sf$Region)))
   updateSelectizeInput(session, "region_select", 
                        choices = c("All Regions" = "All", setNames(region_choices_vec, paste("Region", region_choices_vec))), 
                        selected = "All", 
                        server = TRUE)
+  
+  # --- MUTUALLY EXCLUSIVE SELECTION OBSERVERS ("All" vs Specific Items) ---
+  observeEvent(input$region_select, {
+    sel <- input$region_select
+    if (length(sel) > 1 && "All" %in% sel) {
+      if (tail(sel, 1) == "All") {
+        updateSelectizeInput(session, "region_select", selected = "All")
+      } else {
+        updateSelectizeInput(session, "region_select", selected = setdiff(sel, "All"))
+      }
+    }
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  observeEvent(input$site, {
+    sel <- input$site
+    if (length(sel) > 1 && "All" %in% sel) {
+      if (tail(sel, 1) == "All") {
+        updateSelectizeInput(session, "site", selected = "All")
+      } else {
+        updateSelectizeInput(session, "site", selected = setdiff(sel, "All"))
+      }
+    }
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  observeEvent(input$comp_site, {
+    sel <- input$comp_site
+    if (length(sel) > 1 && "All" %in% sel) {
+      if (tail(sel, 1) == "All") {
+        updateSelectizeInput(session, "comp_site", selected = "All")
+      } else {
+        updateSelectizeInput(session, "comp_site", selected = setdiff(sel, "All"))
+      }
+    }
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
+  
+  observeEvent(input$perf_comp_site, {
+    sel <- input$perf_comp_site
+    if (length(sel) > 1 && "All" %in% sel) {
+      if (tail(sel, 1) == "All") {
+        updateSelectizeInput(session, "perf_comp_site", selected = "All")
+      } else {
+        updateSelectizeInput(session, "perf_comp_site", selected = setdiff(sel, "All"))
+      }
+    }
+  }, ignoreInit = TRUE, ignoreNULL = TRUE)
   
   observeEvent(input$clear_sites, {
     updateSelectizeInput(session, "comp_site", selected = character(0))
@@ -768,40 +822,6 @@ server <- function(input, output, session) {
     return(as.character(sel))
   })
   
-  process_map_click <- function(click_data) {
-    req(click_data, click_data$x, click_data$y)
-    
-    click_pt <- sf::st_sfc(sf::st_point(c(click_data$x, click_data$y)), crs = 4326)
-    hits <- sf::st_intersects(click_pt, mi_counties_sf)
-    
-    if (length(hits[[1]]) > 0) {
-      clicked_reg <- as.character(mi_counties_sf$Region[hits[[1]][1]])
-    } else {
-      distances <- sqrt((mi_counties_map$long - click_data$x)^2 + (mi_counties_map$lat - click_data$y)^2)
-      closest_idx <- which.min(distances)
-      clicked_reg <- as.character(mi_counties_map$Region[closest_idx])
-    }
-    
-    if (length(clicked_reg) > 0 && !is.na(clicked_reg)) {
-      current_sel <- input$region_select
-      
-      if (is.null(current_sel) || "All" %in% current_sel) {
-        new_sel <- clicked_reg
-      } else if (clicked_reg %in% current_sel) {
-        new_sel <- setdiff(current_sel, clicked_reg)
-        if (length(new_sel) == 0) new_sel <- "All"
-      } else {
-        new_sel <- c(current_sel, clicked_reg)
-      }
-      
-      updateSelectizeInput(session, "region_select", selected = new_sel)
-      updateSelectizeInput(session, "site", choices = site_choices, selected = "All", server = TRUE)
-    }
-  }
-  
-  observeEvent(input$map_click_1, process_map_click(input$map_click_1))
-  observeEvent(input$map_click_2, process_map_click(input$map_click_2))
-  
   # --- HISTORIC MAPS LOGIC (TAB 3) ---
   output$hist_ecoli_map <- renderPlotly({
     req(input$tab2_date)
@@ -821,8 +841,16 @@ server <- function(input, output, session) {
         geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
         geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = ecoli_log,
                                          text = paste("Site:", BeachName, "<br>ID:", id, "<br>Log10 E.coli:", round(ecoli_log, 2))),
-                   size = 4, alpha = 0.9) +
-        scale_color_viridis_c(option = "rocket", direction = -1, limits = global_hist_ecoli_lims, name = "Log10(E.coli)") +
+                   size = 2, alpha = 0.9) +
+        # --- REPLACED COLOR SCALE HERE ---
+        scale_color_gradient2(
+          low = "darkgreen",       # Muted green (safe/low)
+          mid = "yellow",       # Neutral yellow (midpoint threshold)
+          high = "red",      # Red (high/exceedance)
+          midpoint = log10(300), # Center gradient at log10(300) ~ 2.477
+          limits = global_hist_ecoli_lims,
+          name = "Log10(E.coli)"
+        ) +
         theme_void() + theme(legend.position = "right")
     )
     
@@ -850,7 +878,7 @@ server <- function(input, output, session) {
         geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
         geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = bactiquick_log,
                                          text = paste("Site:", BeachName, "<br>ID:", id, "<br>Log10 Bacti:", round(bactiquick_log, 2))),
-                   size = 4, alpha = 0.9) +
+                   size = 2, alpha = 0.9) +
         scale_color_viridis_c(option = "mako", direction = -1, limits = global_hist_bacti_lims, name = "Log10(Bacti)") +
         theme_void() + theme(legend.position = "right")
     )
@@ -883,8 +911,16 @@ server <- function(input, output, session) {
         geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
         geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = ecoli_log,
                                          text = paste("Site:", BeachName, "<br>ID:", id, "<br>7-Day Log10 E.coli:", round(ecoli_log, 2))),
-                   size = 4, alpha = 0.9) +
-        scale_color_viridis_c(option = "rocket", direction = -1, limits = global_hist_ecoli_lims, name = "Avg Log10(E.coli)") +
+                   size = 2, alpha = 0.9) +
+        # --- REPLACED COLOR SCALE HERE ---
+        scale_color_gradient2(
+          low = "darkgreen",       # Muted green (safe/low)
+          mid = "yellow",       # Neutral yellow (midpoint threshold)
+          high = "red",      # Red (high/exceedance)
+          midpoint = log10(300), # Center gradient at log10(300) ~ 2.477
+          limits = global_hist_ecoli_lims,
+          name = "Log10(E.coli)"
+        ) +
         theme_void() + theme(legend.position = "right")
     )
     
@@ -916,8 +952,8 @@ server <- function(input, output, session) {
         geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
         geom_point(data = plot_data, aes(x = Longitude, y = Latitude, color = bactiquick_log,
                                          text = paste("Site:", BeachName, "<br>ID:", id, "<br>7-Day Log10 Bacti:", round(bactiquick_log, 2))),
-                   size = 4, alpha = 0.9) +
-        scale_color_viridis_c(option = "mako", direction = -1, limits = global_hist_bacti_lims, name = "Avg Log10(Bacti)") +
+                   size = 2, alpha = 0.9) +
+        scale_color_viridis_c(option = "mako", direction = -1, limits = global_hist_bacti_lims, name = "Log10(Bacti)") +
         theme_void() + theme(legend.position = "right")
     )
     
@@ -1508,20 +1544,33 @@ server <- function(input, output, session) {
     )
   }, striped = TRUE, bordered = TRUE, width = "100%", colnames = TRUE)
   
-  # --- FORECAST LOGIC ---
+  # --- FORECAST DASHBOARD & REGIONAL LOGIC ---
   output$map_title <- renderText({
     req(input$map_date)
     paste("Data Snapshot for:", format(as.Date(input$map_date), "%B %d, %Y"))
   })
   
+  output$map_7day_title <- renderText({
+    req(input$map_date)
+    d1 <- as.Date(input$map_date)
+    d2 <- d1 + 6
+    paste0("7-Day Region Forecast (", as.numeric(format(d1, "%m")), "/", as.numeric(format(d1, "%d")), "/-", as.numeric(format(d2, "%m")), "/", as.numeric(format(d2, "%d")), "/", format(d2, "%Y"), ")")
+  })
+  
   output$trend_title <- renderText({
-    req(input$site, input$trend_metric)
+    req(input$trend_metric)
     metric_label <- ifelse(input$trend_metric == "Forecasted_Ecoli_Level", "E. coli Forecast", "Probability Forecast")
-    sel_regs <- active_regions()
+    sel_regs  <- active_regions()
+    sel_sites <- input$site
     
-    if (input$site != "All") {
-      site_display_name <- names(site_choices)[site_choices == input$site]
-      paste("Trend:", metric_label, "-", site_display_name)
+    if (!is.null(sel_sites) && !("All" %in% sel_sites) && length(sel_sites) > 0) {
+      if (length(sel_sites) == 1) {
+        site_display_name <- names(site_choices)[site_choices == sel_sites]
+        if (length(site_display_name) == 0) site_display_name <- sel_sites
+        paste("Trend:", metric_label, "-", site_display_name)
+      } else {
+        paste("Trend:", metric_label, "-", length(sel_sites), "Selected Sites")
+      }
     } else if (!("All" %in% sel_regs)) {
       paste("Trend:", metric_label, "- Region(s):", paste(sel_regs, collapse = ", "))
     } else {
@@ -1560,9 +1609,9 @@ server <- function(input, output, session) {
         )
       
       if (metric_name == "Forecasted_Ecoli_Level") {
-        fill_scale <- scale_fill_viridis_c(option = "rocket", direction = -1, limits = global_ecoli_limits, na.value = "grey90", name = "Mean E. coli")
+        fill_scale <- scale_fill_gradient2(low = "darkgreen", mid = "yellow", high = "red", midpoint = log10(300), limits = global_ecoli_limits, na.value = "grey90", name = "Mean E. coli")
       } else {
-        fill_scale <- scale_fill_viridis_c(option = "mako", direction = -1, limits = c(0,1), na.value = "grey90", name = "Exc. Prob.")
+        fill_scale <- scale_fill_gradient2(low = "darkgreen", mid = "yellow", high = "red", midpoint = 0.5, limits = c(0,1), na.value = "grey90", name = "Exc. Prob.")
       }
       
       suppressWarnings(
@@ -1601,9 +1650,9 @@ server <- function(input, output, session) {
     if(nrow(target_data) == 0) return(plot_ly() %>% layout(title = "No Coordinate Data Available for this Date/Site"))
     
     if (input$trend_metric == "Forecasted_Ecoli_Level") {
-      color_scale <- scale_color_viridis_c(option = "rocket", direction = -1, limits = global_ecoli_limits, name = "E. coli Level")
+      color_scale <- scale_color_gradient2(low = "darkgreen", mid = "yellow", high = "red", midpoint = log10(300), limits = global_ecoli_limits, name = "E. coli Level")
     } else {
-      color_scale <- scale_color_viridis_c(option = "mako", direction = -1, limits = c(0,1), name = "Exceed Prob.")
+      color_scale <- scale_color_gradient2(low = "darkgreen", mid = "yellow", high = "red", midpoint = 0.5, limits = c(0,1), name = "Exc. Prob.")
     }
     
     p <- suppressWarnings(
@@ -1611,7 +1660,11 @@ server <- function(input, output, session) {
         geom_sf(data = mi_counties_sf, fill = "grey85", color = "grey60", linewidth = 0.2) +
         geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
         geom_point(data = target_data, aes(x = Longitude, y = Latitude, color = metric_val,
-                                           text = paste("Site ID:", id, "<br>Name:", BeachName, "<br>Date:", SampleDate)), size = 3, alpha = 0.8) +
+                                           text = paste0("<b>Site:</b> ", BeachName,
+                                                         "<br><b>ID:</b> ", id,
+                                                         "<br><b>Date:</b> ", SampleDate,
+                                                         "<br><b>Forecasted E. coli:</b> ", round(Forecasted_Ecoli_Level, 2), " MPN",
+                                                         "<br><b>Prob. Exceedance:</b> ", round(Probability_of_Exceedance, 3))), size = 1.8, alpha = 0.85) +
         color_scale + theme_void() + theme(legend.position = "right", legend.title = element_text(face = "bold", size = 10), legend.text = element_text(size = 8))
     )
     
@@ -1621,122 +1674,117 @@ server <- function(input, output, session) {
       config(responsive = TRUE)
   })
   
-  output$timeseries_plot <- renderPlot({
-    req(input$trend_metric, input$site, input$map_date)
+  output$timeseries_plot <- renderPlotly({
+    req(input$trend_metric, input$map_date)
     sel_date <- as.Date(input$map_date)
-    sel_regs <- active_regions()
+    sel_regs  <- active_regions()
+    sel_sites <- input$site
     
-    if (input$site != "All") {
-      trend_df <- current_fcst %>% filter(as.character(id) == as.character(input$site)) %>% mutate(metric_val = as.numeric(as.character(.data[[input$trend_metric]])))
-    } else if (!("All" %in% sel_regs)) {
-      trend_df <- current_fcst %>% 
-        inner_join(geo_info %>% select(id, Region), by = "id") %>% 
-        filter(as.character(Region) %in% sel_regs) %>%
-        group_by(SampleDate, Type) %>% 
-        summarise(metric_val = mean(as.numeric(as.character(.data[[input$trend_metric]])), na.rm = TRUE), .groups = "drop")
-    } else {
-      trend_df <- current_fcst %>% 
-        group_by(SampleDate, Type) %>% 
-        summarise(metric_val = mean(as.numeric(as.character(.data[[input$trend_metric]])), na.rm = TRUE), .groups = "drop")
-    }
+    is_all_sites <- is.null(sel_sites) || ("All" %in% sel_sites) || length(sel_sites) == 0
     
-    if (input$trend_metric == "Forecasted_Ecoli_Level") {
-      trend_df <- trend_df %>% mutate(metric_val = log10(metric_val + 0.001))
-      y_label <- "Log10(E. coli Level + 0.001)"
-    } else {
-      y_label <- "Probability of Exceedance"
-    }
-    
-    trend_df <- trend_df %>% mutate(SampleDate = as.Date(SampleDate))
-    
-    ggplot(trend_df, aes(x = SampleDate, y = metric_val, group = 1)) +
-      geom_line(color = "darkgray", linewidth = 1.2) +
-      geom_point(color = "#2c3e50", size = 3) +
-      geom_vline(xintercept = sel_date, color = "#3498db", linetype = "dashed", linewidth = 1.2) +
-      theme_minimal() + labs(x = "Date", y = y_label) + theme(text = element_text(size = 12))
-  })
-  
-  # --- WEATHER LOGIC ---
-  output$weather_title <- renderText({
-    var_label <- ifelse(input$weather_var == "tmean_10km_avg", "Mean Temperature", "Precipitation")
-    sel_date  <- as.Date(input$weather_date)
-    phase     <- ifelse(sel_date >= index_date, "(Forecast)", "(Historical)")
-    paste(var_label, phase, "- Date:", format(sel_date, "%B %d, %Y"))
-  })
-  
-  output$weather_map <- renderPlotly({
-    req(input$weather_date, input$weather_var)
-    sel_date <- as.Date(input$weather_date)
-    
-    target_weather <- weather_data %>% 
-      filter(as.Date(SampleDate) == sel_date) %>% 
-      mutate(metric_val = as.numeric(as.character(get(input$weather_var))))
-    
-    if(nrow(target_weather) == 0) return(plot_ly() %>% layout(title = "No Data"))
-    
-    color_scale <- if(input$weather_var == "tmean_10km_avg") {
-      scale_color_viridis_c(option = "inferno", limits = global_tmean_limits, name = "Temp (°F)")
-    } else {
-      scale_color_viridis_c(option = "cividis", direction = -1, limits = global_ppt_limits, name = "Precip (mm)")
-    }
-    
-    p <- suppressWarnings(
-      ggplot() +
-        geom_sf(data = mi_counties_sf, fill = "grey90", color = "grey60", linewidth = 0.2) +
-        geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
-        geom_point(data = target_weather, aes(x = Longitude, y = Latitude, color = metric_val,
-                                              text = paste("Site ID:", id, "<br>Name:", BeachName, "<br>Date:", SampleDate)), size = 3, alpha = 0.8) +
-        color_scale + theme_void() + theme(legend.position = "right", legend.title = element_text(face = "bold", size = 12), legend.text = element_text(size = 10))
-    )
-    
-    ggplotly(p, tooltip = "text") %>% 
-      style(hoverinfo = "none", traces = c(1, 2)) %>%
-      layout(autosize = TRUE, margin = list(l = 0, r = 0, b = 0, t = 0)) %>%
-      config(responsive = TRUE)
-  })
-  
-  output$weather_trend_title <- renderText({
-    metric_label <- ifelse(input$weather_var == "tmean_10km_avg", "Mean Temperature (°F)", "Precipitation (mm)")
-    loc_label <- if(input$weather_site == "All") "Statewide Overall Mean" else names(site_choices)[site_choices == input$weather_site]
-    paste(loc_label, "Trend:", metric_label)
-  })
-  
-  output$weather_trend_plot <- renderPlot({
-    req(input$weather_var, input$weather_date, input$weather_site)
-    sel_date <- as.Date(input$weather_date)
-    
-    if (input$weather_site != "All") {
-      trend_df <- weather_data %>% 
-        filter(as.character(id) == as.character(input$weather_site)) %>%
-        mutate(metric_val = as.numeric(as.character(.data[[input$weather_var]])))
-    } else {
-      trend_df <- weather_data %>%
+    if (is_all_sites) {
+      if (!("All" %in% sel_regs)) {
+        base_df <- current_fcst %>% 
+          inner_join(geo_info %>% select(id, Region), by = "id") %>% 
+          filter(as.character(Region) %in% sel_regs)
+      } else {
+        base_df <- current_fcst
+      }
+      
+      trend_df <- base_df %>% 
+        mutate(
+          SampleDate = as.Date(SampleDate),
+          raw_metric = as.numeric(as.character(.data[[input$trend_metric]]))
+        )
+      
+      if (input$trend_metric == "Forecasted_Ecoli_Level") {
+        trend_df <- trend_df %>% mutate(metric_val = log10(raw_metric + 0.001))
+        y_label <- "Log10(E. coli Level + 0.001)"
+        val_unit <- " MPN"
+      } else {
+        trend_df <- trend_df %>% mutate(metric_val = raw_metric)
+        y_label <- "Probability of Exceedance"
+        val_unit <- ""
+      }
+      
+      summary_df <- trend_df %>%
         group_by(SampleDate) %>%
-        summarise(metric_val = mean(as.numeric(as.character(.data[[input$weather_var]])), na.rm = TRUE), .groups = "drop")
+        summarise(
+          mean_val = mean(metric_val, na.rm = TRUE),
+          min_val  = safe_min(metric_val),
+          max_val  = safe_max(metric_val),
+          n_sites  = sum(!is.na(metric_val)),
+          .groups  = "drop"
+        )
+      
+      p <- ggplot(summary_df, aes(x = SampleDate)) +
+        geom_ribbon(aes(ymin = min_val, ymax = max_val, fill = "Min-Max Range"), alpha = 0.2) +
+        geom_line(aes(y = mean_val, color = "Mean Trend"), linewidth = 1) +
+        geom_point(aes(y = mean_val, color = "Mean Trend",
+                       text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                     "<br><b>Mean:</b> ", round(mean_val, 3), val_unit,
+                                     "<br><b>Min:</b> ", round(min_val, 3), val_unit,
+                                     "<br><b>Max:</b> ", round(max_val, 3), val_unit,
+                                     "<br><b>Sites Count:</b> ", n_sites)), size = 2) +
+        geom_vline(xintercept = sel_date, color = "#e74c3c", linetype = "dashed", linewidth = 0.8) +
+        scale_color_manual(name = "", values = c("Mean Trend" = "#2c3e50")) +
+        scale_fill_manual(name = "", values = c("Min-Max Range" = "#3498db")) +
+        theme_minimal() +
+        labs(x = "Date", y = y_label) +
+        theme(text = element_text(size = 11))
+      
+      ggplotly(p, tooltip = "text") %>%
+        layout(
+          autosize = TRUE,
+          margin = list(l = 40, r = 20, t = 20, b = 40),
+          showlegend = FALSE
+        ) %>%
+        config(responsive = TRUE)
+      
+    } else {
+      base_df <- current_fcst %>% 
+        filter(as.character(id) %in% sel_sites) %>%
+        left_join(geo_info %>% select(id, BeachName), by = "id") %>%
+        mutate(
+          SampleDate = as.Date(SampleDate),
+          raw_metric = as.numeric(as.character(.data[[input$trend_metric]]))
+        )
+      
+      if (input$trend_metric == "Forecasted_Ecoli_Level") {
+        base_df <- base_df %>% mutate(metric_val = log10(raw_metric + 0.001))
+        y_label <- "Log10(E. coli Level + 0.001)"
+        val_unit <- " MPN"
+      } else {
+        base_df <- base_df %>% mutate(metric_val = raw_metric)
+        y_label <- "Probability of Exceedance"
+        val_unit <- ""
+      }
+      
+      p <- ggplot(base_df, aes(x = SampleDate, y = metric_val, color = BeachName, group = BeachName)) +
+        geom_line(linewidth = 1) +
+        geom_point(aes(text = paste0("<b>Site:</b> ", BeachName,
+                                     "<br><b>ID:</b> ", id,
+                                     "<br><b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                     "<br><b>Predicted Value:</b> ", round(metric_val, 3), val_unit)), size = 2) +
+        geom_vline(xintercept = sel_date, color = "grey40", linetype = "dashed", linewidth = 0.8) +
+        theme_minimal() +
+        labs(x = "Date", y = y_label, color = "Site Name") +
+        theme(text = element_text(size = 11))
+      
+      ggplotly(p, tooltip = "text") %>%
+        layout(
+          autosize = TRUE,
+          margin = list(l = 40, r = 20, t = 20, b = 40),
+          showlegend = TRUE,
+          legend = list(orientation = "v", x = 1.02, xanchor = "left", y = 1)
+        ) %>%
+        config(responsive = TRUE)
     }
-    
-    trend_df <- trend_df %>% 
-      mutate(
-        SampleDate = as.Date(SampleDate),
-        Timeframe = ifelse(SampleDate < index_date, "Historic", "Forecast")
-      )
-    y_label  <- ifelse(input$weather_var == "tmean_10km_avg", "Mean Temp (°F)", "Mean Precip (mm)")
-    
-    ggplot(trend_df, aes(x = SampleDate, y = metric_val)) +
-      geom_vline(xintercept = index_date - 0.5, color = "black", linetype = "dotted", linewidth = 1) +
-      geom_line(aes(color = Timeframe, group = 1), linewidth = 1.2) +
-      geom_point(aes(color = Timeframe), size = 3) +
-      geom_vline(xintercept = sel_date, color = "#3498db", linetype = "dashed", linewidth = 1.2) +
-      scale_color_manual(values = c("Historic" = "black", "Forecast" = "#e74c3c")) +
-      theme_minimal() +
-      labs(x = "Date", y = y_label, color = "Data Type") +
-      theme(text = element_text(size = 14), legend.position = "bottom")
   })
   
-  
-  # --- FORECAST PERFORMANCE LOGIC ---
+  # --- FORECAST PERFORMANCE LOGIC (TAB 5) ---
   perf_plot_data <- reactive({
-    req(input$perf_comp_site, input$perf_waterbody_filter, input$ecoli_limit)
+    req(input$perf_comp_site, input$perf_waterbody_filter)
     
     if(!exists("matched_comparison_df") || nrow(matched_comparison_df) == 0 || 
        (length(input$perf_comp_site) > 0 && "None" %in% input$perf_comp_site)) {
@@ -1746,7 +1794,9 @@ server <- function(input, output, session) {
     valid_sites <- filtered_site_ids()
     plot_df <- matched_comparison_df %>% filter(id %in% valid_sites)
     
-    if(input$perf_waterbody_filter != "Any") plot_df <- plot_df %>% filter(waterbody_type == input$perf_waterbody_filter)
+    if(input$perf_waterbody_filter != "Any") {
+      plot_df <- plot_df %>% filter(waterbody_type == input$perf_waterbody_filter)
+    }
     
     if(!is.null(input$perf_comp_site) && 
        !any(c("All", "Overall Average") %in% input$perf_comp_site) && 
@@ -1775,7 +1825,6 @@ server <- function(input, output, session) {
         ecoli_fcst_min   = safe_min(fcst_ecoli_log),
         ecoli_fcst_max   = safe_max(fcst_ecoli_log),
         ecoli_fcst_n     = sum(!is.na(fcst_ecoli_log)),
-        
         .groups = "drop"
       )
   })
@@ -1783,44 +1832,55 @@ server <- function(input, output, session) {
   output$perf_compare_plot <- renderPlotly({
     plot_df <- perf_plot_data()
     if(is.null(plot_df) || nrow(plot_df) == 0) {
-      return(plot_ly() %>% layout(title = "No Data Available for Selected Filters"))
+      return(plot_ly() %>% layout(title = "No Data Available for Filters"))
     }
     
-    color_mapping <- c("Observed E. coli" = "black", "Forecasted E. coli" = "#e74c3c")
     thresh_val <- log10(input$perf_ecoli_thresh + 0.001)
     
-    ecoli_df <- plot_df %>% filter(!is.na(ecoli_actual))
-    fcst_df  <- plot_df %>% filter(!is.na(ecoli_fcst))
+    obs_df  <- plot_df %>% filter(!is.na(ecoli_actual))
+    fcst_df <- plot_df %>% filter(!is.na(ecoli_fcst))
     
     p <- ggplot(plot_df, aes(x = SampleDate)) +
       geom_hline(yintercept = thresh_val, linetype = "dashed", color = "red", linewidth = 0.8, alpha = 0.7) +
-      geom_ribbon(data = ecoli_df, aes(ymin = ecoli_actual_min, ymax = ecoli_actual_max), fill = "black", alpha = 0.12) +
-      geom_ribbon(data = fcst_df, aes(ymin = ecoli_fcst_min, ymax = ecoli_fcst_max), fill = "#e74c3c", alpha = 0.12) +
-      geom_line(data = ecoli_df, aes(y = ecoli_actual, color = "Observed E. coli"), linewidth = 1.2, linetype = "dashed", alpha = 0.8) +
-      geom_point(data = ecoli_df, aes(y = ecoli_actual, color = "Observed E. coli",
-                                      text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
-                                                    "<br><b>Metric:</b> Observed E. coli",
-                                                    "<br><b>Log10 Value (Mean):</b> ", round(ecoli_actual, 3),
-                                                    "<br><b>Min:</b> ", round(ecoli_actual_min, 3),
-                                                    "<br><b>Max:</b> ", round(ecoli_actual_max, 3),
-                                                    "<br><b>N:</b> ", ecoli_actual_n)), size = 3, shape = 18, alpha = 0.8) +
-      geom_line(data = fcst_df, aes(y = ecoli_fcst, color = "Forecasted E. coli"), linewidth = 1.2, alpha = 0.8) +
+      geom_ribbon(data = obs_df, aes(ymin = ecoli_actual_min, ymax = ecoli_actual_max, fill = "Observed E. coli"), alpha = 0.15) +
+      geom_line(data = obs_df, aes(y = ecoli_actual, color = "Observed E. coli"), linewidth = 1.2, linetype = "solid") +
+      geom_point(data = obs_df, aes(y = ecoli_actual, color = "Observed E. coli",
+                                    text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
+                                                  "<br><b>Observed Log10:</b> ", round(ecoli_actual, 3),
+                                                  "<br><b>Min:</b> ", round(ecoli_actual_min, 3),
+                                                  "<br><b>Max:</b> ", round(ecoli_actual_max, 3),
+                                                  "<br><b>N:</b> ", ecoli_actual_n)), size = 2.5) +
+      geom_ribbon(data = fcst_df, aes(ymin = ecoli_fcst_min, ymax = ecoli_fcst_max, fill = "Forecasted E. coli"), alpha = 0.15) +
+      geom_line(data = fcst_df, aes(y = ecoli_fcst, color = "Forecasted E. coli"), linewidth = 1.2, linetype = "dashed") +
       geom_point(data = fcst_df, aes(y = ecoli_fcst, color = "Forecasted E. coli",
                                      text = paste0("<b>Date:</b> ", format(SampleDate, "%Y-%m-%d"),
-                                                   "<br><b>Metric:</b> Forecasted E. coli",
-                                                   "<br><b>Log10 Value (Mean):</b> ", round(ecoli_fcst, 3),
+                                                   "<br><b>Forecasted Log10:</b> ", round(ecoli_fcst, 3),
                                                    "<br><b>Min:</b> ", round(ecoli_fcst_min, 3),
                                                    "<br><b>Max:</b> ", round(ecoli_fcst_max, 3),
-                                                   "<br><b>N:</b> ", ecoli_fcst_n)), size = 3, shape = 16, alpha = 0.8) +
-      scale_color_manual(values = color_mapping, name = "Data Source") + 
-      theme_minimal() + 
-      labs(x = "Date", y = "Log10 Level") + 
-      theme(
-        text = element_text(size = 12),
-        plot.margin = margin(t = 10, r = 10, b = 10, l = 0)
-      )
+                                                   "<br><b>N:</b> ", ecoli_fcst_n)), size = 2.5) +
+      scale_color_manual(values = c("Observed E. coli" = "#2c3e50", "Forecasted E. coli" = "#e74c3c"), name = "Metric") +
+      scale_fill_manual(values = c("Observed E. coli" = "#2c3e50", "Forecasted E. coli" = "#e74c3c"), name = "Metric") +
+      guides(fill = "none") +
+      theme_minimal() +
+      labs(x = "Date", y = "Log10 E. coli (MPN)") +
+      theme(text = element_text(size = 12))
     
-    ggplotly(p, tooltip = "text") %>%
+    p_plotly <- ggplotly(p, tooltip = "text")
+    
+    seen_names <- c()
+    for (i in seq_along(p_plotly$x$data)) {
+      if (!is.null(p_plotly$x$data[[i]]$name)) {
+        clean_name <- gsub("^\\((.*),\\d+\\)$", "\\1", p_plotly$x$data[[i]]$name)
+        p_plotly$x$data[[i]]$name <- clean_name
+        if (clean_name %in% seen_names) {
+          p_plotly$x$data[[i]]$showlegend <- FALSE
+        } else {
+          seen_names <- c(seen_names, clean_name)
+        }
+      }
+    }
+    
+    p_plotly %>%
       layout(
         autosize = TRUE,
         margin = list(l = 45, r = 120, t = 20, b = 40),
@@ -1829,8 +1889,9 @@ server <- function(input, output, session) {
       config(responsive = TRUE)
   })
   
+  # --- ROC & AUROC ANALYSIS LOGIC ---
   perf_roc_data <- reactive({
-    req(input$perf_comp_site, input$perf_waterbody_filter, input$perf_ecoli_thresh, input$ecoli_limit)
+    req(input$perf_comp_site, input$perf_waterbody_filter, input$perf_ecoli_thresh)
     
     if(!exists("matched_comparison_df") || nrow(matched_comparison_df) == 0 || 
        (length(input$perf_comp_site) > 0 && "None" %in% input$perf_comp_site)) {
@@ -1838,149 +1899,259 @@ server <- function(input, output, session) {
     }
     
     valid_sites <- filtered_site_ids()
-    df <- matched_comparison_df %>% filter(id %in% valid_sites)
+    plot_df <- matched_comparison_df %>% filter(id %in% valid_sites)
     
-    if(input$perf_waterbody_filter != "Any") df <- df %>% filter(waterbody_type == input$perf_waterbody_filter)
+    if(input$perf_waterbody_filter != "Any") {
+      plot_df <- plot_df %>% filter(waterbody_type == input$perf_waterbody_filter)
+    }
     
     if(!is.null(input$perf_comp_site) && 
        !any(c("All", "Overall Average") %in% input$perf_comp_site) && 
        length(input$perf_comp_site) > 0) {
-      df <- df %>% filter(id %in% input$perf_comp_site)
+      plot_df <- plot_df %>% filter(id %in% input$perf_comp_site)
     }
     
-    df <- df %>%
-      filter(!is.na(minet_ecoli_log) & !is.na(fcst_ecoli_log)) %>%
-      mutate(
-        obs_ecoli_raw = 10^(minet_ecoli_log) - 0.001,
-        fcst_ecoli_raw = 10^(fcst_ecoli_log) - 0.001
-      ) %>%
-      filter(obs_ecoli_raw >= input$ecoli_limit[1] & obs_ecoli_raw <= input$ecoli_limit[2])
+    plot_df <- plot_df %>% filter(!is.na(minet_ecoli_log) & !is.na(fcst_ecoli_log))
     
-    if(nrow(df) == 0) return(NULL)
+    if(nrow(plot_df) < 5) return(NULL)
     
-    ecoli_thresh <- input$perf_ecoli_thresh
-    df <- df %>%
-      mutate(
-        obs_exceed = ifelse(obs_ecoli_raw >= ecoli_thresh, 1, 0),
-        fcst_score = fcst_ecoli_log
-      )
+    thresh_log <- log10(input$perf_ecoli_thresh + 0.001)
     
-    return(df)
+    plot_df <- plot_df %>%
+      mutate(actual_exceed = as.numeric(minet_ecoli_log >= thresh_log))
+    
+    if(length(unique(plot_df$actual_exceed)) < 2) return(NULL)
+    
+    roc_obj <- tryCatch({
+      pROC::roc(response = plot_df$actual_exceed, 
+                predictor = plot_df$fcst_ecoli_log, 
+                quiet = TRUE, 
+                ci = TRUE)
+    }, error = function(e) NULL)
+    
+    if(is.null(roc_obj)) return(NULL)
+    
+    list(
+      roc_obj = roc_obj,
+      df = plot_df,
+      thresh_log = thresh_log
+    )
   })
   
   output$perf_auc_plot <- renderPlotly({
-    df <- perf_roc_data()
-    if(is.null(df) || nrow(df) < 3) {
-      return(plot_ly() %>% layout(title = "Insufficient Data for ROC Analysis"))
+    roc_res <- perf_roc_data()
+    if(is.null(roc_res)) {
+      return(plot_ly() %>% layout(
+        title = "Insufficient data or no exceedances detected for ROC analysis",
+        xaxis = list(visible = FALSE),
+        yaxis = list(visible = FALSE)
+      ))
     }
     
-    n_pos <- sum(df$obs_exceed == 1)
-    n_neg <- sum(df$obs_exceed == 0)
-    
-    if(n_pos == 0 || n_neg == 0) {
-      return(plot_ly() %>% layout(title = paste0("ROC curve requires both exceedance and non-exceedance cases.\n(Current selection has ", n_pos, " exceedances, ", n_neg, " non-exceedances)")))
-    }
-    
-    roc_obj <- tryCatch({
-      pROC::roc(response = df$obs_exceed, predictor = df$fcst_score, quiet = TRUE)
-    }, error = function(e) NULL)
-    
-    if(is.null(roc_obj)) {
-      return(plot_ly() %>% layout(title = "Could not calculate ROC curve"))
-    }
+    roc_obj <- roc_res$roc_obj
+    auc_val <- as.numeric(pROC::auc(roc_obj))
+    ci_val  <- pROC::ci.auc(roc_obj)
     
     roc_df <- data.frame(
       FPR = 1 - roc_obj$specificities,
       TPR = roc_obj$sensitivities,
       Threshold = roc_obj$thresholds
-    )
-    roc_df <- roc_df %>% arrange(FPR, TPR)
+    ) %>% arrange(FPR, TPR)
+    
+    selected_thresh <- if (input$perf_thresh_type == "optimal") {
+      coords_best <- pROC::coords(roc_obj, "best", ret = "threshold")
+      if (is.matrix(coords_best) || is.data.frame(coords_best)) coords_best <- coords_best[1, 1]
+      as.numeric(coords_best)
+    } else {
+      roc_res$thresh_log
+    }
+    
+    opt_coord <- pROC::coords(roc_obj, x = selected_thresh, input = "threshold", ret = c("threshold", "sensitivity", "specificity"))
+    if (is.matrix(opt_coord) || is.data.frame(opt_coord)) opt_coord <- opt_coord[1, ]
+    opt_fpr <- 1 - as.numeric(opt_coord["specificity"])
+    opt_tpr <- as.numeric(opt_coord["sensitivity"])
     
     p <- ggplot(roc_df, aes(x = FPR, y = TPR)) +
       geom_segment(aes(x = 0, y = 0, xend = 1, yend = 1), linetype = "dashed", color = "grey50") +
-      geom_line(color = "#e74c3c", linewidth = 1.2) +
-      geom_point(aes(text = paste0("<b>Sensitivity (TPR):</b> ", round(TPR, 3),
-                                   "<br><b>1 - Specificity (FPR):</b> ", round(FPR, 3),
-                                   "<br><b>Forecast Cutoff (Log10):</b> ", round(Threshold, 3))),
-                 color = "#e74c3c", size = 2, alpha = 0.6) +
-      labs(x = "1 - Specificity (False Positive Rate)",
-           y = "Sensitivity (True Positive Rate)",
-           title = paste0("ROC Curve for Exceedance Detection (\u2265 ", input$perf_ecoli_thresh, " MPN)")) +
+      geom_line(color = "#00274C", linewidth = 1.2) +
+      geom_point(data = data.frame(FPR = opt_fpr, TPR = opt_tpr),
+                 aes(x = FPR, y = TPR,
+                     text = paste0("<b>Selected Threshold Point</b>",
+                                   "<br><b>FPR (1-Spec):</b> ", round(opt_fpr, 3),
+                                   "<br><b>TPR (Sens):</b> ", round(opt_tpr, 3),
+                                   "<br><b>Threshold (Log10):</b> ", round(selected_thresh, 3))),
+                 color = "#e74c3c", size = 3.5) +
       theme_minimal() +
-      theme(text = element_text(size = 13))
+      labs(x = "False Positive Rate (1 - Specificity)", y = "True Positive Rate (Sensitivity)") +
+      theme(text = element_text(size = 12))
     
     ggplotly(p, tooltip = "text") %>%
-      layout(autosize = TRUE) %>%
+      layout(
+        autosize = TRUE,
+        margin = list(l = 45, r = 20, t = 20, b = 40)
+      ) %>%
       config(responsive = TRUE)
   })
   
   output$perf_auc_stats <- renderTable({
-    df <- perf_roc_data()
-    if(is.null(df) || nrow(df) < 3) return(NULL)
+    roc_res <- perf_roc_data()
+    if(is.null(roc_res)) return(NULL)
     
-    n_pos <- sum(df$obs_exceed == 1)
-    n_neg <- sum(df$obs_exceed == 0)
-    n_total <- nrow(df)
+    roc_obj <- roc_res$roc_obj
+    auc_val <- as.numeric(pROC::auc(roc_obj))
+    ci_val  <- pROC::ci.auc(roc_obj)
     
-    if(n_pos == 0 || n_neg == 0) {
-      return(data.frame(
-        Metric = c("Total Observations", "Observed Exceedances", "Observed Non-exceedances", "Status"),
-        Value = c(as.character(n_total), as.character(n_pos), as.character(n_neg), "Requires both exceedance & non-exceedance cases for ROC"),
-        stringsAsFactors = FALSE
-      ))
+    selected_thresh <- if (input$perf_thresh_type == "optimal") {
+      coords_best <- pROC::coords(roc_obj, "best", ret = "threshold")
+      if (is.matrix(coords_best) || is.data.frame(coords_best)) coords_best <- coords_best[1, 1]
+      as.numeric(coords_best)
+    } else {
+      roc_res$thresh_log
     }
     
-    roc_obj <- tryCatch({
-      pROC::roc(response = df$obs_exceed, predictor = df$fcst_score, quiet = TRUE, ci = TRUE)
-    }, error = function(e) NULL)
+    coords_val <- pROC::coords(roc_obj, x = selected_thresh, input = "threshold",
+                               ret = c("sensitivity", "specificity", "accuracy", "ppv", "npv"))
+    if (is.matrix(coords_val) || is.data.frame(coords_val)) coords_val <- coords_val[1, ]
     
-    if(is.null(roc_obj)) return(NULL)
-    
-    auc_val <- as.numeric(pROC::auc(roc_obj))
-    ci_vals <- pROC::ci.auc(roc_obj)
-    
-    wt <- suppressWarnings(wilcox.test(fcst_score ~ obs_exceed, data = df))
-    p_val_str <- format.pval(wt$p.value, digits = 3)
-    
-    thresh_log <- log10(input$perf_ecoli_thresh + 0.001)
-    fcst_exceed <- ifelse(df$fcst_score >= thresh_log, 1, 0)
-    
-    tp <- sum(df$obs_exceed == 1 & fcst_exceed == 1)
-    fp <- sum(df$obs_exceed == 0 & fcst_exceed == 1)
-    tn <- sum(df$obs_exceed == 0 & fcst_exceed == 0)
-    fn <- sum(df$obs_exceed == 1 & fcst_exceed == 0)
-    
-    sens <- ifelse((tp + fn) > 0, round(tp / (tp + fn) * 100, 1), NA)
-    spec <- ifelse((tn + fp) > 0, round(tn / (tn + fp) * 100, 1), NA)
-    acc  <- round((tp + tn) / n_total * 100, 1)
+    sens  <- as.numeric(coords_val["sensitivity"])
+    spec  <- as.numeric(coords_val["specificity"])
+    acc   <- as.numeric(coords_val["accuracy"])
+    ppv   <- as.numeric(coords_val["ppv"])
+    npv   <- as.numeric(coords_val["npv"])
     
     data.frame(
-      Metric = c(
-        "Exceedance threshold",
-        "AUROC (95% CI)",
-        "p-value (AUC = 0.5)",
-        "Sample size (n)",
-        "Exceedances (n, %)",
-        "Non-exceedances (n, %)",
-        "Sensitivity (%)",
-        "Specificity (%)",
-        "Accuracy (%)"
-      ),
-      Value = c(
-        paste0("\u2265 ", input$perf_ecoli_thresh, " MPN/100 mL"),
-        paste0(round(auc_val, 3), " (", round(ci_vals[1], 3), "\u2013", round(ci_vals[3], 3), ")"),
-        p_val_str,
-        as.character(n_total),
-        paste0(n_pos, " (", round(n_pos / n_total * 100, 1), "%)"),
-        paste0(n_neg, " (", round(n_neg / n_total * 100, 1), "%)"),
-        ifelse(is.na(sens), "N/A", as.character(sens)),
-        ifelse(is.na(spec), "N/A", as.character(spec)),
-        as.character(acc)
+      Metric = c("AUROC (95% CI)", "Selected Cutoff (Log10)", "Sensitivity (TPR)", "Specificity (1 - FPR)", "Accuracy", "Positive Predictive Value", "Negative Predictive Value"),
+      Value  = c(
+        sprintf("%.3f (%.3f - %.3f)", auc_val, ci_val[1], ci_val[3]),
+        sprintf("%.3f", selected_thresh),
+        sprintf("%.1f%%", sens * 100),
+        sprintf("%.1f%%", spec * 100),
+        sprintf("%.1f%%", acc * 100),
+        sprintf("%.1f%%", ppv * 100),
+        sprintf("%.1f%%", npv * 100)
       ),
       stringsAsFactors = FALSE
     )
   }, striped = TRUE, bordered = TRUE, width = "100%", colnames = TRUE)
   
+  # --- WEATHER VIEW LOGIC (TAB 6) ---
+  output$weather_title <- renderText({
+    req(input$weather_date, input$weather_var)
+    var_label <- ifelse(input$weather_var == "tmean_10km_avg", "Mean Temperature (°F)", "Precipitation (mm)")
+    paste("Weather Map:", var_label, "on", format(as.Date(input$weather_date), "%B %d, %Y"))
+  })
+  
+  output$weather_trend_title <- renderText({
+    req(input$weather_var, input$weather_site)
+    var_label <- ifelse(input$weather_var == "tmean_10km_avg", "Mean Temperature (°F)", "Precipitation (mm)")
+    sel_site <- input$weather_site
+    
+    site_label <- if (is.null(sel_site) || "All" %in% sel_site || length(sel_site) == 0) {
+      "All Sites (Statewide Avg)"
+    } else if (length(sel_site) == 1) {
+      s_name <- names(site_choices)[site_choices == sel_site]
+      if (length(s_name) == 0) sel_site else s_name
+    } else {
+      paste(length(sel_site), "Selected Sites")
+    }
+    paste("Weather Trend:", var_label, "-", site_label)
+  })
+  
+  output$weather_map <- renderPlotly({
+    req(input$weather_date, input$weather_var)
+    sel_date <- as.Date(input$weather_date)
+    var_name <- input$weather_var
+    
+    target_data <- weather_data %>%
+      mutate(id = as.character(id), SampleDate = as.Date(SampleDate)) %>%
+      filter(SampleDate == sel_date) %>%
+      filter(!is.na(Latitude) & !is.na(Longitude)) %>%
+      mutate(var_val = as.numeric(as.character(.data[[var_name]])))
+    
+    if (nrow(target_data) == 0) return(plot_ly() %>% layout(title = "No Weather Data Available for Selected Date"))
+    
+    lims <- if (var_name == "tmean_10km_avg") global_tmean_limits else global_ppt_limits
+    lims <- unname(lims)
+    
+    var_label <- ifelse(var_name == "tmean_10km_avg", "Mean Temp (°F)", "Precipitation (mm)")
+    
+    p <- suppressWarnings(
+      ggplot() +
+        geom_sf(data = mi_counties_sf, fill = "grey90", color = "grey60", linewidth = 0.2) +
+        geom_sf(data = mi_regions_sf, fill = NA, color = "black", linewidth = 0.8) +
+        geom_point(data = target_data, aes(
+          x = Longitude, y = Latitude, color = var_val,
+          text = paste0("<b>Site:</b> ", BeachName,
+                        "<br><b>ID:</b> ", id,
+                        "<br><b>Date:</b> ", SampleDate,
+                        "<br><b>", var_label, ":</b> ", round(var_val, 2))
+        ), size = 1, alpha = 0.85) +
+        scale_color_viridis_c(option = ifelse(var_name == "tmean_10km_avg", "inferno", "mako"), 
+                              limits = lims, name = var_label) +
+        theme_void() +
+        theme(legend.position = "right")
+    )
+    
+    ggplotly(p, tooltip = "text") %>%
+      style(hoverinfo = "none", traces = c(1, 2)) %>%
+      layout(autosize = TRUE, margin = list(l = 0, r = 0, b = 0, t = 0)) %>%
+      config(responsive = TRUE)
+  })
+  
+  output$weather_trend_plot <- renderPlot({
+    req(input$weather_var, input$weather_site)
+    var_name <- input$weather_var
+    sel_site <- input$weather_site
+    
+    df <- weather_data %>%
+      mutate(
+        id = as.character(id),
+        SampleDate = as.Date(SampleDate),
+        var_val = as.numeric(as.character(.data[[var_name]]))
+      )
+    
+    if (!is.null(sel_site) && !("All" %in% sel_site) && length(sel_site) > 0) {
+      df <- df %>% filter(id %in% sel_site)
+    }
+    
+    plot_df <- df %>%
+      group_by(SampleDate) %>%
+      summarise(var_val = mean(var_val, na.rm = TRUE), .groups = "drop") %>%
+      filter(!is.na(SampleDate) & !is.na(var_val)) %>%
+      mutate(Data_Type = ifelse(SampleDate < index_date, "Historic", "Forecast"))
+    
+    if (nrow(plot_df) == 0) return(NULL)
+    
+    var_label <- ifelse(var_name == "tmean_10km_avg", "Mean Temp (°F)", "Precipitation (mm)")
+    
+    hist_last <- plot_df %>% filter(Data_Type == "Historic") %>% filter(SampleDate == max(SampleDate))
+    if (nrow(hist_last) > 0) {
+      fcst_part <- plot_df %>% filter(Data_Type == "Forecast")
+      if (nrow(fcst_part) > 0) {
+        hist_last_as_fcst <- hist_last %>% mutate(Data_Type = "Forecast")
+        plot_df_lines <- bind_rows(plot_df, hist_last_as_fcst) %>% arrange(SampleDate)
+      } else {
+        plot_df_lines <- plot_df
+      }
+    } else {
+      plot_df_lines <- plot_df
+    }
+    
+    ggplot() +
+      geom_line(data = plot_df_lines, aes(x = SampleDate, y = var_val, color = Data_Type, group = Data_Type), linewidth = 1) +
+      geom_point(data = plot_df, aes(x = SampleDate, y = var_val, color = Data_Type), size = 2.5) +
+      geom_vline(xintercept = index_date, linetype = "dashed", color = "grey40", linewidth = 0.8) +
+      scale_color_manual(
+        values = c("Historic" = "black", "Forecast" = "red"),
+        name = "Data Type"
+      ) +
+      labs(x = "Date", y = var_label) +
+      theme_minimal(base_size = 13) +
+      theme(
+        legend.position = "top",
+        panel.grid.minor = element_blank()
+      )
+  })
 }
 
 shinyApp(ui = ui, server = server)
