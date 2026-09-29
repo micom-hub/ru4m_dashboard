@@ -510,25 +510,42 @@ ui <- navbarPage(
                       tags$li(tags$b("Integration: "), "Develop a data-driven framework for utilizing the rapid endotoxin testing system to support local partners.")
                     ),
                     br(),
-                    h3(tags$b("Participating Laboratories and Health Departments")),
-                    tags$ul(
-                      tags$li("Bay County Health Department"),
-                      tags$li("District Health Department No. 2"),
-                      tags$li("Michigan Environmental, Great Lakes, and Energy"),
-                      tags$li("Ferris State University"),
-                      tags$li("Grand Valley State University"),
-                      tags$li("Great Lakes Environmental Center"),
-                      tags$li("Kalamazoo County Health and Community Services"),
-                      tags$li("Kent County Health Department"),
-                      tags$li("Oakland County Health Department"),
-                      tags$li("Public Health - Muskegon County"),
-                      tags$li("Robert B. Annis Water Resources Institute"),
-                      tags$li("Saginaw Valley State University"),
-                      tags$li("the Watershed Center"),
-                      tags$li("Washtenaw County Health Department"),
-                      tags$li("Western Upper Peninsula Health Department")
+                    tags$div(
+                      h3(tags$b("Consortium contributors")),
+                      br(),
+                      fluidRow(
+                        column(
+                          width = 6,
+                          tags$h5(tags$b("MiNET labs")),
+                          tags$ul(
+                            tags$li("Michigan Technological University- Keenum Lab"),
+                            tags$li("Michigan State University- Rose-D’Souza Lab"),
+                            tags$li("University of Michigan- Wigginton-Eisenberg Lab"),
+                            tags$li("Wayne State University-Ram lab"),
+                            tags$li("Saginaw Valley State University"),
+                            tags$li("Great Lakes Environmental Center"),
+                            tags$li("Annis Water Resources Institute Grand Valley State University"),
+                            tags$li("Ferris State University")
+                          )
+                        ),
+                        column(
+                          width = 6,
+                          tags$h5(tags$b("Health Departments")),
+                          tags$ul(
+                            tags$li("Oakland County Health Division"),
+                            tags$li("Kalamazoo County Health Department"),
+                            tags$li("Bay County Health Department"),
+                            tags$li("District Health Department No. 2"),
+                            tags$li("Kent County Health Department"),
+                            tags$li("Public Health-Muskegon County"),
+                            tags$li("Washtenaw County Health Department"),
+                            tags$li("Wayne County Health Department"),
+                            tags$li("The Watershed Center")
+                          )
+                        )
+                      ),
+                      br()
                     ),
-                    br(),
                     h3(tags$b("Methods")),
                     tags$ul(
                       tags$li("Laboratory",
@@ -546,8 +563,11 @@ ui <- navbarPage(
                                         tags$a(href = "https://prism.oregonstate.edu/", "PRISM"),". E. coli levels are forecasting using site geographical location and weather features based on weather 
                                         forecasts from ",tags$a(href="https://open-meteo.com/","Open Meteo"),"."),
                                 div(
-                                  style = "display: flex; justify-content: center; align-items: center;",
-                                  img(src = "ru4m_flow.png", height = "180px", width = "auto")
+                                  style = "display: flex; justify-content: center; align-items: center; width: 100%;",
+                                  img(
+                                    src = "ru4m_flow.png", 
+                                    style = "max-width: 100%; max-height: 180px; width: auto; height: auto;"
+                                  )
                                 )
                               ))
                     ),
