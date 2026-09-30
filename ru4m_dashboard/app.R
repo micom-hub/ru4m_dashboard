@@ -599,6 +599,7 @@ ui <- navbarPage(
 
 
 # --- 3. SHINY SERVER ----
+  
 server <- function(input, output, session) {
   
   updateSelectizeInput(session, "site", choices = site_choices, server = TRUE, selected = "All")
@@ -744,7 +745,17 @@ server <- function(input, output, session) {
       } else {
         new_choices <- c("No Sites Match Filter" = "None")
       }
-      updateSelectizeInput(session, "comp_site", choices = new_choices, selected = "All", server = TRUE)
+      
+      # Preserve current user selection if still present in new options
+      curr_selected <- isolate(input$comp_site)
+      valid_selected <- intersect(curr_selected, unname(new_choices))
+      
+      # Default to "All" only if previous selection is no longer valid
+      if (length(valid_selected) == 0) {
+        valid_selected <- if ("All" %in% new_choices) "All" else "None"
+      }
+      
+      updateSelectizeInput(session, "comp_site", choices = new_choices, selected = valid_selected, server = TRUE)
     } else {
       updateSelectizeInput(session, "comp_site", choices = c("No Match Between Forecast and Minet Dates" = "None"), server = TRUE)
     }
@@ -773,13 +784,21 @@ server <- function(input, output, session) {
       } else {
         new_choices <- c("No Sites Match Filter" = "None")
       }
-      updateSelectizeInput(session, "perf_comp_site", choices = new_choices, selected = "All", server = TRUE)
+      
+      # Preserve current user selection if still present in new options
+      curr_selected <- isolate(input$perf_comp_site)
+      valid_selected <- intersect(curr_selected, unname(new_choices))
+      
+      # Default to "All" only if previous selection is no longer valid
+      if (length(valid_selected) == 0) {
+        valid_selected <- if ("All" %in% new_choices) "All" else "None"
+      }
+      
+      updateSelectizeInput(session, "perf_comp_site", choices = new_choices, selected = valid_selected, server = TRUE)
     } else {
       updateSelectizeInput(session, "perf_comp_site", choices = c("No Match Between Forecast and Minet Dates" = "None"), server = TRUE)
     }
   })
-  
-  
   # --- TAB 2 LOGIC 1: STATIC/ALL SITES DATA AVAILABILITY MAP (LEFT) ---
   output$all_sites_availability_map <- renderPlotly({
     site_avail <- minet_data %>%
@@ -1545,9 +1564,22 @@ server <- function(input, output, session) {
   # --- LOG10 SUMMARY TABLE ---
   output$bact_scatter_stats <- renderTable({
     target_data <- get_scatter_data()
-    if(is.null(target_data) || nrow(target_data) == 0) return(NULL)
     
-    ct <- cor.test(target_data$ecoli_log, target_data$bactiquick_log, method = "spearman", exact = FALSE)
+    # Check for insufficient sample size (< 3 observations)
+    if (is.null(target_data) || nrow(target_data) < 3) {
+      return(data.frame(Note = "too few samples to show statistics", stringsAsFactors = FALSE))
+    }
+    
+    # Safely calculate correlation and handle potential calculation errors
+    ct <- tryCatch(
+      cor.test(target_data$ecoli_log, target_data$bactiquick_log, method = "spearman", exact = FALSE),
+      error = function(e) NULL
+    )
+    
+    if (is.null(ct) || is.na(ct$estimate)) {
+      return(data.frame(Note = "too few samples to show statistics", stringsAsFactors = FALSE))
+    }
+    
     rho <- round(ct$estimate, 3)
     pval <- format.pval(ct$p.value, digits = 3)
     n_pts <- nrow(target_data)
@@ -1597,6 +1629,7 @@ server <- function(input, output, session) {
       stringsAsFactors = FALSE
     )
   }, striped = TRUE, bordered = TRUE, width = "100%", colnames = TRUE)
+
   
   # --- RAW SCATTER PLOT ---
   output$bact_scatter_raw <- renderPlotly({
@@ -1649,9 +1682,22 @@ server <- function(input, output, session) {
   # --- RAW SUMMARY TABLE ---
   output$bact_scatter_raw_stats <- renderTable({
     target_data <- get_scatter_data()
-    if(is.null(target_data) || nrow(target_data) == 0) return(NULL)
     
-    ct <- cor.test(target_data$ecoli_raw, target_data$bacti_raw, method = "spearman", exact = FALSE)
+    # Check for insufficient sample size (< 3 observations)
+    if (is.null(target_data) || nrow(target_data) < 3) {
+      return(data.frame(Note = "too few samples to show statistics", stringsAsFactors = FALSE))
+    }
+    
+    # Safely calculate correlation and handle potential calculation errors
+    ct <- tryCatch(
+      cor.test(target_data$ecoli_raw, target_data$bacti_raw, method = "spearman", exact = FALSE),
+      error = function(e) NULL
+    )
+    
+    if (is.null(ct) || is.na(ct$estimate)) {
+      return(data.frame(Note = "too few samples to show statistics", stringsAsFactors = FALSE))
+    }
+    
     rho <- round(ct$estimate, 3)
     pval <- format.pval(ct$p.value, digits = 3)
     n_pts <- nrow(target_data)
@@ -1701,6 +1747,7 @@ server <- function(input, output, session) {
       stringsAsFactors = FALSE
     )
   }, striped = TRUE, bordered = TRUE, width = "100%", colnames = TRUE)
+
   
   # --- FORECAST DASHBOARD & REGIONAL LOGIC ---
   output$map_title <- renderText({
