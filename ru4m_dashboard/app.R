@@ -524,7 +524,8 @@ ui <- navbarPage(
                             tags$li("Wayne State University-Ram lab"),
                             tags$li("Saginaw Valley State University"),
                             tags$li("Great Lakes Environmental Center"),
-                            tags$li("Annis Water Resources Institute Grand Valley State University"),
+                            tags$li("Grand Valley State University - Annis Water Resources Institute"),
+                            tags$li("Grand Valley State University - Cell and Molecular Biology"),
                             tags$li("Ferris State University")
                           )
                         ),
