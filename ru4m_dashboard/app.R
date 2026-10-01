@@ -330,7 +330,7 @@ ui <- navbarPage(
                
                hr(),
                radioButtons("color_mode", "Relationship Color Mode:",
-                            choices = c("Exceedance Disagreement" = "disagree",
+                            choices = c("Exceedance Agreement" = "disagree",
                                         "Percentage Discordance" = "discordant")),
                conditionalPanel(
                  condition = "input.color_mode == 'discordant'",
@@ -1593,9 +1593,9 @@ server <- function(input, output, session) {
     q4_ecoli   <- sum(target_data$ecoli_log >= ecoli_thresh & target_data$bactiquick_log < bacti_thresh, na.rm = TRUE)
     
     if (input$color_mode == "disagree") {
-      disagree_pct <- round(mean((target_data$ecoli_log >= ecoli_thresh) != (target_data$bactiquick_log >= bacti_thresh), na.rm = TRUE) * 100, 1)
-      rel_label <- "Disagreement Percentage"
-      rel_val   <- paste0(disagree_pct, "%")
+      agree_pct <- round((1-mean((target_data$ecoli_log >= ecoli_thresh) != (target_data$bactiquick_log >= bacti_thresh), na.rm = TRUE) )* 100, 1)
+      rel_label <- "Agreement Percentage"
+      rel_val   <- paste0(agree_pct, "%")
     } else {
       req(input$discordance_pct)
       pct_thresh  <- input$discordance_pct / 100
